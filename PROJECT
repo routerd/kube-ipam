@@ -1,3 +1,10 @@
 domain: routerd.net
 repo: routerd.net/kube-ipam
+resources:
+- group: ipam
+  kind: IPPool
+  version: v1alpha1
+- group: ipam
+  kind: IPLease
+  version: v1alpha1
 version: "2"

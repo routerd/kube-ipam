@@ -1,0 +1,7 @@
+apiVersion: ipam.routerd.net/v1alpha1
+kind: IPPool
+metadata:
+  name: ippool-sample
+spec:
+  # Add fields here
+  foo: bar
