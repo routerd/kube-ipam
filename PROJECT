@@ -1,0 +1,3 @@
+domain: routerd.net
+repo: routerd.net/kube-ipam
+version: "2"
