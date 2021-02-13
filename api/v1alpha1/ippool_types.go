@@ -42,11 +42,23 @@ type IPv6Pool struct {
 }
 
 // IPPoolStatus defines the observed state of IPPool
-type IPPoolStatus struct{}
+type IPPoolStatus struct {
+	IPv4 *PoolStatus `json:"ipv4,omitempty"`
+	IPv6 *PoolStatus `json:"ipv6,omitempty"`
+}
+
+type PoolStatus struct {
+	AvailableIPs int `json:"availableIPs"`
+	AcquiredIPs  int `json:"acquiredIPs"`
+}
 
 // IPPool is the Schema for the ippools API
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="IPv4 Available",type="integer",JSONPath=".status.ipv4.availableIPs"
+// +kubebuilder:printcolumn:name="IPv4 Acquired",type="integer",JSONPath=".status.ipv4.acquiredIPs"
+// +kubebuilder:printcolumn:name="IPv6 Available",type="integer",JSONPath=".status.ipv6.availableIPs"
+// +kubebuilder:printcolumn:name="IPv6 Acquired",type="integer",JSONPath=".status.ipv6.acquiredIPs"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type IPPool struct {
 	metav1.TypeMeta   `json:",inline"`

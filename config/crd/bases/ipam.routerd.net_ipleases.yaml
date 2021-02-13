@@ -17,6 +17,12 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .status.addresses
+      name: Addresses
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -64,7 +70,6 @@ spec:
                 - addresses
                 type: object
             required:
-            - lastRenewTime
             - pool
             type: object
           status:
@@ -158,9 +163,6 @@ spec:
               phase:
                 description: Human readable status aggregated from conditions.
                 type: string
-            required:
-            - addresses
-            - expireTime
             type: object
         type: object
     served: true

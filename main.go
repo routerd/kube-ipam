@@ -66,18 +66,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	ipamCache := controllers.NewIPAMCache()
+
 	if err = (&controllers.IPPoolReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("IPPool"),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Log:       ctrl.Log.WithName("controllers").WithName("IPPool"),
+		Scheme:    mgr.GetScheme(),
+		IPAMCache: ipamCache,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "IPPool")
 		os.Exit(1)
 	}
 	if err = (&controllers.IPLeaseReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("IPLease"),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Log:       ctrl.Log.WithName("controllers").WithName("IPLease"),
+		Scheme:    mgr.GetScheme(),
+		IPAMCache: ipamCache,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "IPLease")
 		os.Exit(1)

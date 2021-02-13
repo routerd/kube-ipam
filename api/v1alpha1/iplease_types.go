@@ -25,9 +25,9 @@ type IPLeaseSpec struct {
 	// References the pool to lease an IP from.
 	Pool LocalObjectReference `json:"pool"`
 	// Static IP lease settings.
-	Static StaticIPLease `json:"static,omitempty"`
+	Static *StaticIPLease `json:"static,omitempty"`
 	// Time this lease was renewed the last time.
-	LastRenewTime metav1.Time `json:"lastRenewTime"`
+	LastRenewTime metav1.Time `json:"lastRenewTime,omitempty"`
 }
 
 type StaticIPLease struct {
@@ -48,11 +48,11 @@ type IPLeaseStatus struct {
 	// Human readable status aggregated from conditions.
 	Phase string `json:"phase,omitempty"`
 	// List of leased addresses.
-	Addresses []string `json:"addresses"`
+	Addresses []string `json:"addresses,omitempty"`
 	// Time this lease expires without renewal.
 	// If this time is After .spec.lastRenewTime,
 	// clients need to acquire a new lease.
-	ExpireTime metav1.Time `json:"expireTime"`
+	ExpireTime metav1.Time `json:"expireTime,omitempty"`
 }
 
 // IPLease Condition Types
@@ -63,6 +63,8 @@ const (
 // IPLease is the Schema for the ipleases API
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Addresses",type="string",JSONPath=".status.addresses"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type IPLease struct {
 	metav1.TypeMeta   `json:",inline"`

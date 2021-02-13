@@ -1,7 +1,7 @@
 apiVersion: ipam.routerd.net/v1alpha1
 kind: IPLease
 metadata:
-  name: sample
+  name: sample1
 spec:
   pool:
     name: sample
