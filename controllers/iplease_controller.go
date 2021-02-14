@@ -124,7 +124,7 @@ func (r *IPLeaseReconciler) allocateIPs(
 }
 
 func (r *IPLeaseReconciler) allocateStaticIPs(
-	ctx context.Context, ipam goipam.Ipamer,
+	ctx context.Context, ipam Ipamer,
 	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
 ) (ctrl.Result, error) {
 
@@ -206,7 +206,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 }
 
 func (r *IPLeaseReconciler) allocateDynamicIPs(
-	ctx context.Context, ipam goipam.Ipamer,
+	ctx context.Context, ipam Ipamer,
 	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
 ) (ctrl.Result, error) {
 	// Make sure we report the Lease Duration.
@@ -266,7 +266,7 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 
 func (r *IPLeaseReconciler) reportAllocatedIPs(
 	ctx context.Context, iplease *ipamv1alpha1.IPLease,
-	ipam goipam.Ipamer, allocatedIPs []*goipam.IP,
+	ipam Ipamer, allocatedIPs []*goipam.IP,
 ) error {
 	for _, ip := range allocatedIPs {
 		iplease.Status.Addresses = append(iplease.Status.Addresses, ip.IP.String())
@@ -333,7 +333,6 @@ func (r *IPLeaseReconciler) ensureCacheFinalizer(ctx context.Context, iplease *i
 	if controllerutil.ContainsFinalizer(iplease, ipamCacheFinalizer) {
 		return nil
 	}
-
 	controllerutil.AddFinalizer(iplease, ipamCacheFinalizer)
 	if err := r.Update(ctx, iplease); err != nil {
 		return err

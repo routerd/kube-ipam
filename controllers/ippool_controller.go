@@ -48,25 +48,16 @@ type IPPoolReconciler struct {
 
 func (r *IPPoolReconciler) Reconcile(
 	ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
-
 	ippool := &ipamv1alpha1.IPPool{}
 	if err = r.Get(ctx, req.NamespacedName, ippool); err != nil {
 		return res, client.IgnoreNotFound(err)
 	}
-	controllerutil.AddFinalizer(ippool, ipamCacheFinalizer)
-	if err = r.Update(ctx, ippool); err != nil {
+	if err := r.ensureCacheFinalizer(ctx, ippool); err != nil {
 		return res, err
 	}
 
 	if !ippool.DeletionTimestamp.IsZero() {
-		// was deleted -> cleanup
-		r.IPAMCache.Free(ippool)
-
-		controllerutil.RemoveFinalizer(ippool, ipamCacheFinalizer)
-		if err = r.Update(ctx, ippool); err != nil {
-			return res, err
-		}
-		return res, nil
+		return res, r.handleDeletion(ctx, ippool)
 	}
 
 	ipam, err := r.IPAMCache.GetOrCreate(ctx, ippool, r.createIPAM)
@@ -97,12 +88,11 @@ func (r *IPPoolReconciler) Reconcile(
 	if err := r.Status().Update(ctx, ippool); err != nil {
 		return res, err
 	}
-
 	return ctrl.Result{}, nil
 }
 
 func (r *IPPoolReconciler) createIPAM(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool) (goipam.Ipamer, error) {
+	ctx context.Context, ippool *ipamv1alpha1.IPPool) (Ipamer, error) {
 	// Create new IPAM
 	ipam := goipam.New()
 
@@ -174,4 +164,26 @@ func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 			})).
 		Complete(r)
+}
+
+func (r *IPPoolReconciler) handleDeletion(ctx context.Context, ippool *ipamv1alpha1.IPPool) error {
+	// was deleted -> cleanup
+	r.IPAMCache.Free(ippool)
+
+	controllerutil.RemoveFinalizer(ippool, ipamCacheFinalizer)
+	if err := r.Update(ctx, ippool); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *IPPoolReconciler) ensureCacheFinalizer(ctx context.Context, ippool *ipamv1alpha1.IPPool) error {
+	if controllerutil.ContainsFinalizer(ippool, ipamCacheFinalizer) {
+		return nil
+	}
+	controllerutil.AddFinalizer(ippool, ipamCacheFinalizer)
+	if err := r.Update(ctx, ippool); err != nil {
+		return err
+	}
+	return nil
 }
