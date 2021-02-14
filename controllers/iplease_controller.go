@@ -127,10 +127,9 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 	ctx context.Context, ipam Ipamer,
 	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
 ) (ctrl.Result, error) {
-
 	var (
 		unavailableIPs []string
-		allocatedIPs   []*goipam.IP
+		allocatedIPs   []goipam.IP
 	)
 
 	for _, addr := range iplease.Spec.Static.Addresses {
@@ -156,7 +155,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			allocatedIPs = append(allocatedIPs, ip)
+			allocatedIPs = append(allocatedIPs, *ip)
 			continue
 		}
 
@@ -176,7 +175,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			allocatedIPs = append(allocatedIPs, ip)
+			allocatedIPs = append(allocatedIPs, *ip)
 			continue
 		}
 	}
@@ -184,7 +183,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 	if len(unavailableIPs) > 0 {
 		// ensure to free IPs we wanted to allocate
 		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(ip)
+			_, _ = ipam.ReleaseIP(&ip)
 		}
 
 		iplease.Status.Phase = "Unavailable"
@@ -214,7 +213,7 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 
 	var (
 		unavailableCIDRs []string
-		allocatedIPs     []*goipam.IP
+		allocatedIPs     []goipam.IP
 	)
 	if ippool.Spec.IPv4 != nil {
 		// IPv4
@@ -225,7 +224,7 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 			return ctrl.Result{}, err
 		}
 
-		allocatedIPs = append(allocatedIPs, ip)
+		allocatedIPs = append(allocatedIPs, *ip)
 	}
 
 	if ippool.Spec.IPv6 != nil {
@@ -237,13 +236,13 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 			return ctrl.Result{}, err
 		}
 
-		allocatedIPs = append(allocatedIPs, ip)
+		allocatedIPs = append(allocatedIPs, *ip)
 	}
 
 	if len(unavailableCIDRs) > 0 {
 		// ensure to free IPs we wanted to allocate
 		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(ip)
+			_, _ = ipam.ReleaseIP(&ip)
 		}
 
 		iplease.Status.Phase = "Unavailable"
@@ -266,7 +265,7 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 
 func (r *IPLeaseReconciler) reportAllocatedIPs(
 	ctx context.Context, iplease *ipamv1alpha1.IPLease,
-	ipam Ipamer, allocatedIPs []*goipam.IP,
+	ipam Ipamer, allocatedIPs []goipam.IP,
 ) error {
 	for _, ip := range allocatedIPs {
 		iplease.Status.Addresses = append(iplease.Status.Addresses, ip.IP.String())
@@ -283,7 +282,7 @@ func (r *IPLeaseReconciler) reportAllocatedIPs(
 	if err := r.Status().Update(ctx, iplease); err != nil {
 		// ensure to free IPs we wanted to allocate
 		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(ip)
+			_, _ = ipam.ReleaseIP(&ip)
 		}
 		return err
 	}

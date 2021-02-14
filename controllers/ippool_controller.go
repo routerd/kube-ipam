@@ -21,7 +21,6 @@ import (
 	"net"
 
 	"github.com/go-logr/logr"
-	goipam "github.com/metal-stack/go-ipam"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,9 +40,10 @@ type IPPoolReconciler struct {
 	Log       logr.Logger
 	Scheme    *runtime.Scheme
 	IPAMCache ipamCache
+	NewIPAM   func() Ipamer
 }
 
-// +kubebuilder:rbac:groups=ipam.routerd.net,resources=ippools,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ipam.routerd.net,resources=ippools,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=ipam.routerd.net,resources=ippools/status,verbs=get;update;patch
 
 func (r *IPPoolReconciler) Reconcile(
@@ -65,82 +65,7 @@ func (r *IPPoolReconciler) Reconcile(
 		return res, err
 	}
 
-	ippool.Status.IPv4 = nil
-	ippool.Status.IPv6 = nil
-	if ippool.Spec.IPv4 != nil {
-		ipv4Prefix := ipam.PrefixFrom(ippool.Spec.IPv4.CIDR)
-		u := ipv4Prefix.Usage()
-		ippool.Status.IPv4 = &ipamv1alpha1.IPTypePoolStatus{
-			AvailableIPs: int(u.AvailableIPs),
-			AllocatedIPs: int(u.AcquiredIPs),
-		}
-	}
-
-	if ippool.Spec.IPv6 != nil {
-		ipv6Prefix := ipam.PrefixFrom(ippool.Spec.IPv6.CIDR)
-		u := ipv6Prefix.Usage()
-		ippool.Status.IPv6 = &ipamv1alpha1.IPTypePoolStatus{
-			AvailableIPs: int(u.AvailableIPs),
-			AllocatedIPs: int(u.AcquiredIPs),
-		}
-	}
-
-	if err := r.Status().Update(ctx, ippool); err != nil {
-		return res, err
-	}
-	return ctrl.Result{}, nil
-}
-
-func (r *IPPoolReconciler) createIPAM(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool) (Ipamer, error) {
-	// Create new IPAM
-	ipam := goipam.New()
-
-	// Add Pool CIDRs
-	if ippool.Spec.IPv4 != nil {
-		_, err := ipam.NewPrefix(ippool.Spec.IPv4.CIDR)
-		if err != nil {
-			return ipam, err
-		}
-	}
-	if ippool.Spec.IPv6 != nil {
-		_, err := ipam.NewPrefix(ippool.Spec.IPv6.CIDR)
-		if err != nil {
-			return ipam, err
-		}
-	}
-
-	// Add existing Leases
-	ipleaseList := &ipamv1alpha1.IPLeaseList{}
-	if err := r.List(ctx, ipleaseList,
-		client.InNamespace(ippool.Namespace)); err != nil {
-		return ipam, err
-	}
-	for _, iplease := range ipleaseList.Items {
-		if !meta.IsStatusConditionTrue(
-			iplease.Status.Conditions, ipamv1alpha1.IPLeaseBound) {
-			// not bound
-			continue
-		}
-
-		if iplease.HasExpired() {
-			// already expired
-			continue
-		}
-
-		for _, addr := range iplease.Status.Addresses {
-			_, ipnet, err := net.ParseCIDR(addr)
-			if err != nil || ipnet == nil {
-				// log!
-				continue
-			}
-			_, err = ipam.AcquireSpecificIP(ipnet.Network(), ipnet.IP.String())
-			if err != nil {
-				return ipam, err
-			}
-		}
-	}
-	return ipam, nil
+	return ctrl.Result{}, r.reportUsage(ctx, ippool, ipam)
 }
 
 func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -186,4 +111,91 @@ func (r *IPPoolReconciler) ensureCacheFinalizer(ctx context.Context, ippool *ipa
 		return err
 	}
 	return nil
+}
+
+func (r *IPPoolReconciler) reportUsage(
+	ctx context.Context, ippool *ipamv1alpha1.IPPool, ipam Ipamer) error {
+	ippool.Status.IPv4 = nil
+	ippool.Status.IPv6 = nil
+	if ippool.Spec.IPv4 != nil {
+		ipv4Prefix := ipam.PrefixFrom(ippool.Spec.IPv4.CIDR)
+		u := ipv4Prefix.Usage()
+		ippool.Status.IPv4 = &ipamv1alpha1.IPTypePoolStatus{
+			AvailableIPs: int(u.AvailableIPs),
+			AllocatedIPs: int(u.AcquiredIPs),
+		}
+	}
+
+	if ippool.Spec.IPv6 != nil {
+		ipv6Prefix := ipam.PrefixFrom(ippool.Spec.IPv6.CIDR)
+		u := ipv6Prefix.Usage()
+		ippool.Status.IPv6 = &ipamv1alpha1.IPTypePoolStatus{
+			AvailableIPs: int(u.AvailableIPs),
+			AllocatedIPs: int(u.AcquiredIPs),
+		}
+	}
+	if err := r.Status().Update(ctx, ippool); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *IPPoolReconciler) createIPAM(
+	ctx context.Context, ippool *ipamv1alpha1.IPPool) (Ipamer, error) {
+	// Create new IPAM
+	ipam := r.NewIPAM()
+
+	// Add Pool CIDRs
+	if ippool.Spec.IPv4 != nil {
+		_, err := ipam.NewPrefix(ippool.Spec.IPv4.CIDR)
+		if err != nil {
+			return ipam, err
+		}
+	}
+	if ippool.Spec.IPv6 != nil {
+		_, err := ipam.NewPrefix(ippool.Spec.IPv6.CIDR)
+		if err != nil {
+			return ipam, err
+		}
+	}
+
+	// Add existing Leases
+	ipleaseList := &ipamv1alpha1.IPLeaseList{}
+	if err := r.List(ctx, ipleaseList,
+		client.InNamespace(ippool.Namespace)); err != nil {
+		return ipam, err
+	}
+	for _, iplease := range ipleaseList.Items {
+		if iplease.Spec.Pool.Name != ippool.Name {
+			continue
+		}
+		if !meta.IsStatusConditionTrue(
+			iplease.Status.Conditions, ipamv1alpha1.IPLeaseBound) {
+			continue
+		}
+		if iplease.HasExpired() {
+			continue
+		}
+
+		for _, addr := range iplease.Status.Addresses {
+			ip := net.ParseIP(addr)
+			if ip == nil {
+				continue
+			}
+
+			if ip.To4() != nil && ippool.Spec.IPv4 != nil {
+				_, err := ipam.AcquireSpecificIP(ippool.Spec.IPv4.CIDR, addr)
+				if err != nil {
+					return ipam, err
+				}
+			}
+			if ip.To4() == nil && ippool.Spec.IPv6 != nil {
+				_, err := ipam.AcquireSpecificIP(ippool.Spec.IPv6.CIDR, addr)
+				if err != nil {
+					return ipam, err
+				}
+			}
+		}
+	}
+	return ipam, nil
 }

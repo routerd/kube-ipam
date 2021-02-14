@@ -18,17 +18,64 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"testing"
 
+	goipam "github.com/metal-stack/go-ipam"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"inet.af/netaddr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"routerd.net/kube-ipam/api/v1alpha1"
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 )
+
+func TestIPLeaseReconciler_reportAllocatedIPs(t *testing.T) {
+	t.Run("reports IPs", func(t *testing.T) {
+		c := NewClient()
+		ipam := &ipamMock{}
+
+		r := &IPLeaseReconciler{
+			Client: c,
+		}
+
+		iplease := &ipamv1alpha1.IPLease{}
+		c.StatusMock.On("Update", mock.Anything, iplease, mock.Anything).Return(nil)
+
+		ctx := context.Background()
+		err := r.reportAllocatedIPs(ctx, iplease, ipam, []goipam.IP{{IP: netaddr.MustParseIP("192.0.2.1")}})
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"192.0.2.1"}, iplease.Status.Addresses)
+	})
+
+	t.Run("releases IPs on failure", func(t *testing.T) {
+		c := NewClient()
+		ipam := &ipamMock{}
+
+		r := &IPLeaseReconciler{
+			Client: c,
+		}
+
+		iplease := &ipamv1alpha1.IPLease{}
+		c.StatusMock.On("Update", mock.Anything, iplease, mock.Anything).Return(fmt.Errorf("boom"))
+		ipam.On("ReleaseIP", mock.Anything).Return((*goipam.Prefix)(nil), nil)
+
+		ctx := context.Background()
+		ip := goipam.IP{IP: netaddr.MustParseIP("192.0.2.1")}
+		err := r.reportAllocatedIPs(ctx, iplease, ipam, []goipam.IP{ip})
+		require.Error(t, err)
+
+		ipam.AssertCalled(t, "ReleaseIP", mock.MatchedBy(func(obj interface{}) bool {
+			gotIP := obj.(*goipam.IP)
+			return reflect.DeepEqual(*gotIP, ip)
+		}))
+	})
+}
 
 func TestIPLeaseReconciler_handleDeletion(t *testing.T) {
 	c := NewClient()
