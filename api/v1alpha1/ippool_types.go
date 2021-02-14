@@ -23,42 +23,39 @@ import (
 // IPPoolSpec defines the desired state of IPPool
 type IPPoolSpec struct {
 	// IPv4 addresss pool
-	IPv4 *IPv4Pool `json:"ipv4,omitempty"`
+	IPv4 *IPTypePool `json:"ipv4,omitempty"`
 	// IPv6 addresss pool
-	IPv6 *IPv6Pool `json:"ipv6,omitempty"`
+	IPv6 *IPTypePool `json:"ipv6,omitempty"`
 	// lease duration for leased ips.
 	// Lease must be renewed in time or it will be reclaimed into the pool.
-	LeaseDuration metav1.Duration `json:"leaseDuration"`
+	LeaseDuration *metav1.Duration `json:"leaseDuration,omitempty"`
 }
 
-// IPv4 address pool configuration.
-type IPv4Pool struct {
-	CIDR string `json:"cidr"`
-}
-
-// IPv6 address pool configuration.
-type IPv6Pool struct {
+// IP address pool configuration.
+type IPTypePool struct {
 	CIDR string `json:"cidr"`
 }
 
 // IPPoolStatus defines the observed state of IPPool
 type IPPoolStatus struct {
-	IPv4 *PoolStatus `json:"ipv4,omitempty"`
-	IPv6 *PoolStatus `json:"ipv6,omitempty"`
+	IPv4 *IPTypePoolStatus `json:"ipv4,omitempty"`
+	IPv6 *IPTypePoolStatus `json:"ipv6,omitempty"`
 }
 
-type PoolStatus struct {
+type IPTypePoolStatus struct {
+	// Number of all IPs available in the subnet.
 	AvailableIPs int `json:"availableIPs"`
-	AcquiredIPs  int `json:"acquiredIPs"`
+	// Number of allocated IPs in the subnet. (includes Network/Broadcast)
+	AllocatedIPs int `json:"allocatedIPs"`
 }
 
 // IPPool is the Schema for the ippools API
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="IPv4 Available",type="integer",JSONPath=".status.ipv4.availableIPs"
-// +kubebuilder:printcolumn:name="IPv4 Acquired",type="integer",JSONPath=".status.ipv4.acquiredIPs"
+// +kubebuilder:printcolumn:name="IPv4 Allocated",type="integer",JSONPath=".status.ipv4.allocatedIPs"
 // +kubebuilder:printcolumn:name="IPv6 Available",type="integer",JSONPath=".status.ipv6.availableIPs"
-// +kubebuilder:printcolumn:name="IPv6 Acquired",type="integer",JSONPath=".status.ipv6.acquiredIPs"
+// +kubebuilder:printcolumn:name="IPv6 Allocated",type="integer",JSONPath=".status.ipv6.allocatedIPs"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type IPPool struct {
 	metav1.TypeMeta   `json:",inline"`

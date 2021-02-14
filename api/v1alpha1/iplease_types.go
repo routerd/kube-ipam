@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -26,8 +28,9 @@ type IPLeaseSpec struct {
 	Pool LocalObjectReference `json:"pool"`
 	// Static IP lease settings.
 	Static *StaticIPLease `json:"static,omitempty"`
-	// Time this lease was renewed the last time.
-	LastRenewTime metav1.Time `json:"lastRenewTime,omitempty"`
+	// Renew time is the time when the lease holder has last updated the lease.
+	// Falls back to .metadata.creationTimestamp if not set.
+	RenewTime metav1.MicroTime `json:"renewTime,omitempty"`
 }
 
 type StaticIPLease struct {
@@ -49,10 +52,8 @@ type IPLeaseStatus struct {
 	Phase string `json:"phase,omitempty"`
 	// List of leased addresses.
 	Addresses []string `json:"addresses,omitempty"`
-	// Time this lease expires without renewal.
-	// If this time is After .spec.lastRenewTime,
-	// clients need to acquire a new lease.
-	ExpireTime metav1.Time `json:"expireTime,omitempty"`
+	// Duration of the lease, if empty lease does not expire.
+	LeaseDuration *metav1.Duration `json:"leaseDuration,omitempty"`
 }
 
 // IPLease Condition Types
@@ -72,6 +73,24 @@ type IPLease struct {
 
 	Spec   IPLeaseSpec   `json:"spec,omitempty"`
 	Status IPLeaseStatus `json:"status,omitempty"`
+}
+
+func (lease *IPLease) HasExpired() bool {
+	if lease.Status.LeaseDuration == nil {
+		// no lease duration
+		// -> can't expire
+		return false
+	}
+
+	now := time.Now().UTC()
+	// default RenewTime to creation time.
+	// TODO: move this into a Defaulting Webhook.
+	renewTime := lease.CreationTimestamp.Time
+	if !lease.Spec.RenewTime.IsZero() {
+		renewTime = lease.Spec.RenewTime.Time
+	}
+
+	return renewTime.UTC().Add(lease.Status.LeaseDuration.Duration).Before(now)
 }
 
 // IPLeaseList contains a list of IPLease

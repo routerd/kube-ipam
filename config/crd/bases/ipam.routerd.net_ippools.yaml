@@ -20,14 +20,14 @@ spec:
     - jsonPath: .status.ipv4.availableIPs
       name: IPv4 Available
       type: integer
-    - jsonPath: .status.ipv4.acquiredIPs
-      name: IPv4 Acquired
+    - jsonPath: .status.ipv4.allocatedIPs
+      name: IPv4 Allocated
       type: integer
     - jsonPath: .status.ipv6.availableIPs
       name: IPv6 Available
       type: integer
-    - jsonPath: .status.ipv6.acquiredIPs
-      name: IPv6 Acquired
+    - jsonPath: .status.ipv6.allocatedIPs
+      name: IPv6 Allocated
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -72,30 +72,34 @@ spec:
                 description: lease duration for leased ips. Lease must be renewed
                   in time or it will be reclaimed into the pool.
                 type: string
-            required:
-            - leaseDuration
             type: object
           status:
             description: IPPoolStatus defines the observed state of IPPool
             properties:
               ipv4:
                 properties:
-                  acquiredIPs:
+                  allocatedIPs:
+                    description: Number of allocated IPs in the subnet. (includes
+                      Network/Broadcast)
                     type: integer
                   availableIPs:
+                    description: Number of all IPs available in the subnet.
                     type: integer
                 required:
-                - acquiredIPs
+                - allocatedIPs
                 - availableIPs
                 type: object
               ipv6:
                 properties:
-                  acquiredIPs:
+                  allocatedIPs:
+                    description: Number of allocated IPs in the subnet. (includes
+                      Network/Broadcast)
                     type: integer
                   availableIPs:
+                    description: Number of all IPs available in the subnet.
                     type: integer
                 required:
-                - acquiredIPs
+                - allocatedIPs
                 - availableIPs
                 type: object
             type: object

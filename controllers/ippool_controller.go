@@ -79,18 +79,18 @@ func (r *IPPoolReconciler) Reconcile(
 	if ippool.Spec.IPv4 != nil {
 		ipv4Prefix := ipam.PrefixFrom(ippool.Spec.IPv4.CIDR)
 		u := ipv4Prefix.Usage()
-		ippool.Status.IPv4 = &ipamv1alpha1.PoolStatus{
+		ippool.Status.IPv4 = &ipamv1alpha1.IPTypePoolStatus{
 			AvailableIPs: int(u.AvailableIPs),
-			AcquiredIPs:  int(u.AcquiredIPs),
+			AllocatedIPs: int(u.AcquiredIPs),
 		}
 	}
 
 	if ippool.Spec.IPv6 != nil {
 		ipv6Prefix := ipam.PrefixFrom(ippool.Spec.IPv6.CIDR)
 		u := ipv6Prefix.Usage()
-		ippool.Status.IPv6 = &ipamv1alpha1.PoolStatus{
+		ippool.Status.IPv6 = &ipamv1alpha1.IPTypePoolStatus{
 			AvailableIPs: int(u.AvailableIPs),
-			AcquiredIPs:  int(u.AcquiredIPs),
+			AllocatedIPs: int(u.AcquiredIPs),
 		}
 	}
 
@@ -133,8 +133,7 @@ func (r *IPPoolReconciler) createIPAM(
 			continue
 		}
 
-		if !iplease.Status.ExpireTime.IsZero() &&
-			!iplease.Spec.LastRenewTime.Before(&iplease.Status.ExpireTime) {
+		if iplease.HasExpired() {
 			// already expired
 			continue
 		}

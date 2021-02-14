@@ -22,7 +22,6 @@ import (
 
 	goipam "github.com/metal-stack/go-ipam"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 )
@@ -80,51 +79,4 @@ func (i *IPAMCache) Free(ippool *ipamv1alpha1.IPPool) {
 	defer i.ipamsMux.Unlock()
 
 	delete(i.ipams, ippool.UID)
-}
-
-type SyncedIPAM struct {
-	goipam.Ipamer
-	client client.Client
-
-	synced chan struct{}
-}
-
-func NewSyncedIPAM(ipam goipam.Ipamer, client client.Client) *SyncedIPAM {
-	return &SyncedIPAM{
-		Ipamer: ipam,
-		client: client,
-		synced: make(chan struct{}),
-	}
-}
-
-func (ipam *SyncedIPAM) Start(ctx context.Context) error {
-	ippoolList := &ipamv1alpha1.IPPoolList{}
-	if err := ipam.client.List(ctx, ippoolList); err != nil {
-		return err
-	}
-
-	// Add Pool CIDRs
-	for _, pool := range ippoolList.Items {
-		if pool.Spec.IPv4 != nil {
-			_, err := ipam.NewPrefix(pool.Spec.IPv4.CIDR)
-			if err != nil {
-				return err
-			}
-		}
-
-		if pool.Spec.IPv6 != nil {
-			_, err := ipam.NewPrefix(pool.Spec.IPv6.CIDR)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	// Add all known IPs
-
-	return nil
-}
-
-func (ipam *SyncedIPAM) WaitForSync() {
-	<-ipam.synced
 }

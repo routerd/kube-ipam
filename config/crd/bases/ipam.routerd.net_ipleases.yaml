@@ -46,10 +46,6 @@ spec:
           spec:
             description: IPLeaseSpec defines the desired state of IPLease
             properties:
-              lastRenewTime:
-                description: Time this lease was renewed the last time.
-                format: date-time
-                type: string
               pool:
                 description: References the pool to lease an IP from.
                 properties:
@@ -58,6 +54,12 @@ spec:
                 required:
                 - name
                 type: object
+              renewTime:
+                description: Renew time is the time when the lease holder has last
+                  updated the lease. Falls back to .metadata.creationTimestamp if
+                  not set.
+                format: date-time
+                type: string
               static:
                 description: Static IP lease settings.
                 properties:
@@ -151,10 +153,8 @@ spec:
                   - type
                   type: object
                 type: array
-              expireTime:
-                description: Time this lease expires without renewal. If this time
-                  is After .spec.lastRenewTime, clients need to acquire a new lease.
-                format: date-time
+              leaseDuration:
+                description: Duration of the lease, if empty lease does not expire.
                 type: string
               observedGeneration:
                 description: The most recent generation observed by the controller.

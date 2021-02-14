@@ -7,4 +7,4 @@ spec:
     cidr: 172.20.0.0/24
   ipv6:
     cidr: fd9c:fd74:6b8d:1020::/64
-  leaseDuration: 5s
+  leaseDuration: 30s
