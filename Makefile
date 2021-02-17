@@ -94,6 +94,10 @@ test: generate fmt vet manifests
 	CGO_ENABLED=1 go test -race -v ./...
 .PHONY: test
 
+ci-test: test
+	hack/validate-directory-clean.sh
+.PHONY: ci-test
+
 fmt:
 	go fmt ./...
 .PHONY: fmt
