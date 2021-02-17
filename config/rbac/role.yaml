@@ -1,0 +1,48 @@
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - ipam.routerd.net
+  resources:
+  - ipleases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ipam.routerd.net
+  resources:
+  - ipleases/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ipam.routerd.net
+  resources:
+  - ippools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ipam.routerd.net
+  resources:
+  - ippools/status
+  verbs:
+  - get
+  - patch
+  - update

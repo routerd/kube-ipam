@@ -1,0 +1,14 @@
+# Example of a Static IP Assignment
+apiVersion: ipam.routerd.net/v1alpha1
+kind: IPLease
+metadata:
+  name: sample-infra
+spec:
+  pool:
+    name: sample
+  static:
+    addresses:
+    - 172.20.0.1 # router
+    - 172.20.0.2 # dhcp
+    - fd9c:fd74:6b8d:1020::1 # router
+    - fd9c:fd74:6b8d:1020::2 # dhcp
