@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,6 +29,8 @@ type IPLeaseSpec struct {
 	Pool LocalObjectReference `json:"pool"`
 	// Static IP lease settings.
 	Static *StaticIPLease `json:"static,omitempty"`
+	// IPFamilies that this lease should include.
+	IPFamilies []corev1.IPFamily `json:"ipFamilies"`
 	// Renew time is the time when the lease holder has last updated the lease.
 	// Falls back to .metadata.creationTimestamp if not set.
 	RenewTime metav1.MicroTime `json:"renewTime,omitempty"`
@@ -91,6 +94,24 @@ func (lease *IPLease) HasExpired() bool {
 	}
 
 	return renewTime.UTC().Add(lease.Status.LeaseDuration.Duration).Before(now)
+}
+
+func (lease *IPLease) HasIPv4() bool {
+	for _, ipFamily := range lease.Spec.IPFamilies {
+		if ipFamily == corev1.IPv4Protocol {
+			return true
+		}
+	}
+	return false
+}
+
+func (lease *IPLease) HasIPv6() bool {
+	for _, ipFamily := range lease.Spec.IPFamilies {
+		if ipFamily == corev1.IPv6Protocol {
+			return true
+		}
+	}
+	return false
 }
 
 // IPLeaseList contains a list of IPLease

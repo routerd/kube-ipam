@@ -26,6 +26,7 @@ import (
 
 	"github.com/go-logr/logr"
 	goipam "github.com/metal-stack/go-ipam"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -212,37 +213,57 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 	iplease.Status.LeaseDuration = ippool.Spec.LeaseDuration
 
 	var (
-		unavailableCIDRs []string
-		allocatedIPs     []goipam.IP
+		unavailableCIDRs      []string
+		unavailableIPFamilies []string
+		allocatedIPs          []goipam.IP
 	)
-	if ippool.Spec.IPv4 != nil {
-		// IPv4
-		ip, err := ipam.AcquireIP(ippool.Spec.IPv4.CIDR)
-		if errors.Is(err, goipam.ErrNoIPAvailable) {
-			unavailableCIDRs = append(unavailableCIDRs, ippool.Spec.IPv4.CIDR)
-		} else if err != nil {
-			return ctrl.Result{}, err
-		}
+	if iplease.HasIPv4() {
+		if ippool.Spec.IPv4 != nil {
+			// IPv4
+			ip, err := ipam.AcquireIP(ippool.Spec.IPv4.CIDR)
+			if errors.Is(err, goipam.ErrNoIPAvailable) {
+				unavailableCIDRs = append(unavailableCIDRs, ippool.Spec.IPv4.CIDR)
+			} else if err != nil {
+				return ctrl.Result{}, err
+			}
 
-		allocatedIPs = append(allocatedIPs, *ip)
+			allocatedIPs = append(allocatedIPs, *ip)
+		} else {
+			// Pool does not support IPv4
+			unavailableIPFamilies = append(unavailableIPFamilies, string(corev1.IPv4Protocol))
+		}
 	}
 
-	if ippool.Spec.IPv6 != nil {
-		// IPv6
-		ip, err := ipam.AcquireIP(ippool.Spec.IPv6.CIDR)
-		if errors.Is(err, goipam.ErrNoIPAvailable) {
-			unavailableCIDRs = append(unavailableCIDRs, ippool.Spec.IPv6.CIDR)
-		} else if err != nil {
-			return ctrl.Result{}, err
-		}
+	if iplease.HasIPv6() {
+		if ippool.Spec.IPv6 != nil {
+			// IPv6
+			ip, err := ipam.AcquireIP(ippool.Spec.IPv6.CIDR)
+			if errors.Is(err, goipam.ErrNoIPAvailable) {
+				unavailableCIDRs = append(unavailableCIDRs, ippool.Spec.IPv6.CIDR)
+			} else if err != nil {
+				return ctrl.Result{}, err
+			}
 
-		allocatedIPs = append(allocatedIPs, *ip)
+			allocatedIPs = append(allocatedIPs, *ip)
+		} else {
+			// Pool does not support IPv6
+			unavailableIPFamilies = append(unavailableIPFamilies, string(corev1.IPv6Protocol))
+		}
 	}
 
-	if len(unavailableCIDRs) > 0 {
+	if len(unavailableCIDRs) > 0 ||
+		len(unavailableIPFamilies) > 0 {
 		// ensure to free IPs we wanted to allocate
 		for _, ip := range allocatedIPs {
 			_, _ = ipam.ReleaseIP(&ip)
+		}
+
+		msg := "could not allocate IPs"
+		if len(unavailableCIDRs) > 0 {
+			msg += " from CIDRS: " + strings.Join(unavailableCIDRs, ", ")
+		}
+		if len(unavailableIPFamilies) > 0 {
+			msg += " from unsupported IP Families: " + strings.Join(unavailableIPFamilies, ", ")
 		}
 
 		iplease.Status.Phase = "Unavailable"
@@ -250,7 +271,7 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 		meta.SetStatusCondition(&iplease.Status.Conditions, metav1.Condition{
 			Type:               ipamv1alpha1.IPLeaseBound,
 			Reason:             "Unavailable",
-			Message:            fmt.Sprintf("could not allocate IPs from CIDRs: %s", strings.Join(unavailableCIDRs, ", ")),
+			Message:            msg,
 			ObservedGeneration: iplease.Generation,
 			Status:             metav1.ConditionFalse,
 		})
