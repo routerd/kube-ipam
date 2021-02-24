@@ -4,6 +4,7 @@ kind: IPLease
 metadata:
   name: sample-infra
 spec:
+  ipFamilies: [IPv4, IPv6]
   pool:
     name: sample
   static:

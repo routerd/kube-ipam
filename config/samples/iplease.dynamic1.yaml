@@ -5,3 +5,4 @@ metadata:
 spec:
   pool:
     name: sample
+  ipFamilies: [IPv4, IPv6]

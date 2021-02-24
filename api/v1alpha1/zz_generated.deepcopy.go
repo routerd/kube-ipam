@@ -21,7 +21,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -93,6 +94,11 @@ func (in *IPLeaseSpec) DeepCopyInto(out *IPLeaseSpec) {
 		*out = new(StaticIPLease)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.IPFamilies != nil {
+		in, out := &in.IPFamilies, &out.IPFamilies
+		*out = make([]v1.IPFamily, len(*in))
+		copy(*out, *in)
+	}
 	in.RenewTime.DeepCopyInto(&out.RenewTime)
 }
 
@@ -111,7 +117,7 @@ func (in *IPLeaseStatus) DeepCopyInto(out *IPLeaseStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]v1.Condition, len(*in))
+		*out = make([]metav1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -123,7 +129,7 @@ func (in *IPLeaseStatus) DeepCopyInto(out *IPLeaseStatus) {
 	}
 	if in.LeaseDuration != nil {
 		in, out := &in.LeaseDuration, &out.LeaseDuration
-		*out = new(v1.Duration)
+		*out = new(metav1.Duration)
 		**out = **in
 	}
 }
@@ -212,7 +218,7 @@ func (in *IPPoolSpec) DeepCopyInto(out *IPPoolSpec) {
 	}
 	if in.LeaseDuration != nil {
 		in, out := &in.LeaseDuration, &out.LeaseDuration
-		*out = new(v1.Duration)
+		*out = new(metav1.Duration)
 		**out = **in
 	}
 }
