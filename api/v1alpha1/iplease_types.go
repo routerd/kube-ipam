@@ -69,6 +69,7 @@ const (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Addresses",type="string",JSONPath=".status.addresses"
+// +kubebuilder:printcolumn:name="Renew",type="date",JSONPath=".spec.renewTime"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type IPLease struct {
 	metav1.TypeMeta   `json:",inline"`
