@@ -327,6 +327,8 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPOnError(t *testing.T) {
 	ipv6 := &ipam.IP{
 		IP: netaddr.MustParseIP("fd9c:fd74:6b8d:1020::2"),
 	}
+	expectedErr := fmt.Errorf("boom")
+	ctx := context.Background()
 
 	t.Run("release IPv6 when IPv4 allocation returns error", func(t *testing.T) {
 		client := NewClient()
@@ -335,8 +337,6 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPOnError(t *testing.T) {
 			Return(nil)
 
 		ipamer := &ipamMock{}
-		ctx := context.Background()
-		expectedErr := fmt.Errorf("boom")
 
 		ipamer.
 			On("AcquireSpecificIP", commonIPPool.Spec.IPv4.CIDR, "172.20.0.2").
@@ -361,8 +361,6 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPOnError(t *testing.T) {
 			Return(nil)
 
 		ipamer := &ipamMock{}
-		ctx := context.Background()
-		expectedErr := fmt.Errorf("boom")
 
 		ipamer.
 			On("AcquireSpecificIP", commonIPPool.Spec.IPv4.CIDR, "172.20.0.2").
