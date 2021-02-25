@@ -108,7 +108,8 @@ func (r *IPLeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *IPLeaseReconciler) allocateIPs(
-	ctx context.Context, log logr.Logger, iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
+	ctx context.Context, log logr.Logger,
+	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
 ) (ctrl.Result, error) {
 	ipam, ok := r.IPAMCache.Get(ippool)
 	if !ok {
@@ -127,11 +128,21 @@ func (r *IPLeaseReconciler) allocateIPs(
 func (r *IPLeaseReconciler) allocateStaticIPs(
 	ctx context.Context, ipam Ipamer,
 	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
-) (ctrl.Result, error) {
+) (res ctrl.Result, err error) {
 	var (
 		unavailableIPs []string
 		allocatedIPs   []goipam.IP
 	)
+
+	defer func() {
+		if err != nil || len(unavailableIPs) > 0 {
+			// if we encounter any error or could not acquire all IPs,
+			// we want to free the acquired IPs so they are not blocked.
+			for _, ip := range allocatedIPs {
+				_, _ = ipam.ReleaseIP(&ip)
+			}
+		}
+	}()
 
 	for _, addr := range iplease.Spec.Static.Addresses {
 		ip := net.ParseIP(addr)
@@ -158,9 +169,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 			}
 			allocatedIPs = append(allocatedIPs, *ip)
 			continue
-		}
-
-		if ip.To4() == nil {
+		} else {
 			// try to acquire specific IPv6
 			if ippool.Spec.IPv6 == nil {
 				// can't allocate an IPv6 if the Pool has no IPv6 CIDR.
@@ -199,7 +208,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 		return ctrl.Result{
 			// Retry to allocate later.
 			RequeueAfter: 5 * time.Second,
-		}, nil
+		}, r.Status().Update(ctx, iplease)
 	}
 
 	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, allocatedIPs)
@@ -208,7 +217,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 func (r *IPLeaseReconciler) allocateDynamicIPs(
 	ctx context.Context, ipam Ipamer,
 	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
-) (ctrl.Result, error) {
+) (res ctrl.Result, err error) {
 	// Make sure we report the Lease Duration.
 	iplease.Status.LeaseDuration = ippool.Spec.LeaseDuration
 
@@ -217,6 +226,19 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 		unavailableIPFamilies []string
 		allocatedIPs          []goipam.IP
 	)
+
+	defer func() {
+		if err != nil ||
+			len(unavailableCIDRs) > 0 ||
+			len(unavailableIPFamilies) > 0 {
+			// if we encounter any error or could not acquire all IPs,
+			// we want to free the acquired IPs so they are not blocked.
+			for _, ip := range allocatedIPs {
+				_, _ = ipam.ReleaseIP(&ip)
+			}
+		}
+	}()
+
 	if iplease.HasIPv4() {
 		if ippool.Spec.IPv4 != nil {
 			// IPv4
@@ -253,11 +275,6 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 
 	if len(unavailableCIDRs) > 0 ||
 		len(unavailableIPFamilies) > 0 {
-		// ensure to free IPs we wanted to allocate
-		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(&ip)
-		}
-
 		msg := "could not allocate IPs"
 		if len(unavailableCIDRs) > 0 {
 			msg += " from CIDRS: " + strings.Join(unavailableCIDRs, ", ")
@@ -301,10 +318,6 @@ func (r *IPLeaseReconciler) reportAllocatedIPs(
 		Status:             metav1.ConditionTrue,
 	})
 	if err := r.Status().Update(ctx, iplease); err != nil {
-		// ensure to free IPs we wanted to allocate
-		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(&ip)
-		}
 		return err
 	}
 	return nil

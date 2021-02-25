@@ -20,6 +20,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/metal-stack/go-ipam"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -27,8 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
-	"routerd.net/kube-ipam/controllers"
-	// +kubebuilder:scaffold:imports
+	"routerd.net/kube-ipam/internal/controllers"
 )
 
 var (
@@ -38,9 +38,7 @@ var (
 
 func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
-
 	_ = ipamv1alpha1.AddToScheme(scheme)
-	// +kubebuilder:scaffold:scheme
 }
 
 func main() {
@@ -73,6 +71,7 @@ func main() {
 		Log:       ctrl.Log.WithName("controllers").WithName("IPPool"),
 		Scheme:    mgr.GetScheme(),
 		IPAMCache: ipamCache,
+		NewIPAM:   func() controllers.Ipamer { return ipam.New() },
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "IPPool")
 		os.Exit(1)
@@ -86,7 +85,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "IPLease")
 		os.Exit(1)
 	}
-	// +kubebuilder:scaffold:builder
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

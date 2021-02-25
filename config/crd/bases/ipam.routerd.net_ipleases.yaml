@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.addresses
       name: Addresses
       type: string
+    - jsonPath: .spec.renewTime
+      name: Renew
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
