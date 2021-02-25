@@ -135,14 +135,12 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 	)
 
 	defer func() {
-		if err == nil {
-			return
-		}
-
-		// if we encounter any error, we want to free the acquired IPs
-		// so they are not blocked.
-		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(&ip)
+		if err != nil || len(unavailableIPs) > 0 {
+			// if we encounter any error or could not acquire all IPs,
+			// we want to free the acquired IPs so they are not blocked.
+			for _, ip := range allocatedIPs {
+				_, _ = ipam.ReleaseIP(&ip)
+			}
 		}
 	}()
 
@@ -210,7 +208,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 		return ctrl.Result{
 			// Retry to allocate later.
 			RequeueAfter: 5 * time.Second,
-		}, nil
+		}, r.Status().Update(ctx, iplease)
 	}
 
 	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, allocatedIPs)
@@ -230,14 +228,14 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 	)
 
 	defer func() {
-		if err == nil {
-			return
-		}
-
-		// if we encounter any error, we want to free the acquired IPs
-		// so they are not blocked.
-		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(&ip)
+		if err != nil ||
+			len(unavailableCIDRs) > 0 ||
+			len(unavailableIPFamilies) > 0 {
+			// if we encounter any error or could not acquire all IPs,
+			// we want to free the acquired IPs so they are not blocked.
+			for _, ip := range allocatedIPs {
+				_, _ = ipam.ReleaseIP(&ip)
+			}
 		}
 	}()
 
@@ -277,11 +275,6 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 
 	if len(unavailableCIDRs) > 0 ||
 		len(unavailableIPFamilies) > 0 {
-		// ensure to free IPs we wanted to allocate
-		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(&ip)
-		}
-
 		msg := "could not allocate IPs"
 		if len(unavailableCIDRs) > 0 {
 			msg += " from CIDRS: " + strings.Join(unavailableCIDRs, ", ")

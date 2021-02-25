@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"inet.af/netaddr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -296,8 +297,8 @@ func TestIPLeaseReconciler_allocateIPs(t *testing.T) {
 	})
 }
 
-func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t *testing.T) {
-	commonIPPool := &ipamv1alpha1.IPPool{
+var (
+	commonIPPool = &ipamv1alpha1.IPPool{
 		Spec: ipamv1alpha1.IPPoolSpec{
 			IPv4: &ipamv1alpha1.IPTypePool{
 				CIDR: "172.20.0.2/24",
@@ -307,7 +308,7 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 			},
 		},
 	}
-	commonLease := &ipamv1alpha1.IPLease{
+	commonIPLease = &ipamv1alpha1.IPLease{
 		Spec: ipamv1alpha1.IPLeaseSpec{
 			Static: &ipamv1alpha1.StaticIPLease{
 				Addresses: []string{
@@ -317,6 +318,70 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 			},
 		},
 	}
+)
+
+func TestIPLeaseReconciler_allocateStaticIPs_releaseIPOnError(t *testing.T) {
+	ipv4 := &ipam.IP{
+		IP: netaddr.MustParseIP("172.20.0.2"),
+	}
+	ipv6 := &ipam.IP{
+		IP: netaddr.MustParseIP("fd9c:fd74:6b8d:1020::2"),
+	}
+
+	t.Run("release IPv6 when IPv4 allocation returns error", func(t *testing.T) {
+		client := NewClient()
+		client.StatusMock.
+			On("Update", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+
+		ipamer := &ipamMock{}
+		ctx := context.Background()
+		expectedErr := fmt.Errorf("boom")
+
+		ipamer.
+			On("AcquireSpecificIP", commonIPPool.Spec.IPv4.CIDR, "172.20.0.2").
+			Return(ipv4, expectedErr)
+		ipamer.
+			On("AcquireSpecificIP", commonIPPool.Spec.IPv6.CIDR, "fd9c:fd74:6b8d:1020::2").
+			Return(ipv6, nil)
+
+		ipamer.On("ReleaseIP", ipv6).Return((*ipam.Prefix)(nil), nil)
+
+		r := &IPLeaseReconciler{
+			Client: client,
+		}
+		_, err := r.allocateStaticIPs(ctx, ipamer, commonIPLease, commonIPPool)
+		require.EqualError(t, err, expectedErr.Error())
+	})
+
+	t.Run("release IPv4 when IPv6 allocation returns error", func(t *testing.T) {
+		client := NewClient()
+		client.StatusMock.
+			On("Update", mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+
+		ipamer := &ipamMock{}
+		ctx := context.Background()
+		expectedErr := fmt.Errorf("boom")
+
+		ipamer.
+			On("AcquireSpecificIP", commonIPPool.Spec.IPv4.CIDR, "172.20.0.2").
+			Return(ipv4, nil)
+		ipamer.
+			On("AcquireSpecificIP", commonIPPool.Spec.IPv6.CIDR, "fd9c:fd74:6b8d:1020::2").
+			Return(ipv6, expectedErr)
+
+		ipamer.On("ReleaseIP", ipv4).Return((*ipam.Prefix)(nil), nil)
+
+		r := &IPLeaseReconciler{
+			Client: client,
+		}
+		_, err := r.allocateStaticIPs(ctx, ipamer, commonIPLease, commonIPPool)
+		require.EqualError(t, err, expectedErr.Error())
+	})
+}
+
+func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t *testing.T) {
 
 	tests := []struct {
 		name              string
@@ -329,7 +394,7 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 		{
 			name:    "release IPv6 when IPv4 can not be acquired",
 			ippool:  commonIPPool,
-			iplease: commonLease,
+			iplease: commonIPLease,
 			prepareIpamerMock: func(ipamer *ipamMock, ippool *ipamv1alpha1.IPPool) {
 				ipv4 := &ipam.IP{
 					IP: netaddr.MustParseIP("172.20.0.2"),
@@ -351,7 +416,7 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 		{
 			name:    "release IPv4 when IPv6 can not be acquired",
 			ippool:  commonIPPool,
-			iplease: commonLease,
+			iplease: commonIPLease,
 			prepareIpamerMock: func(ipamer *ipamMock, ippool *ipamv1alpha1.IPPool) {
 				ipv4 := &ipam.IP{
 					IP: netaddr.MustParseIP("172.20.0.2"),
@@ -402,7 +467,7 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 					},
 				},
 			},
-			iplease: commonLease,
+			iplease: commonIPLease,
 			prepareIpamerMock: func(ipamer *ipamMock, ippool *ipamv1alpha1.IPPool) {
 				ipv4 := &ipam.IP{
 					IP: netaddr.MustParseIP("172.20.0.2"),
@@ -424,7 +489,7 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 					},
 				},
 			},
-			iplease: commonLease,
+			iplease: commonIPLease,
 			prepareIpamerMock: func(ipamer *ipamMock, ippool *ipamv1alpha1.IPPool) {
 				ipv6 := &ipam.IP{
 					IP: netaddr.MustParseIP("fd9c:fd74:6b8d:1020::2"),
@@ -460,6 +525,12 @@ func TestIPLeaseReconciler_allocateStaticIPs_releaseIPsIfAllCouldNotBeAcquired(t
 			assert.Equal(t, 5*time.Second, res.RequeueAfter)
 
 			ipamer.AssertExpectations(t)
+
+			cond := meta.FindStatusCondition(test.iplease.Status.Conditions, ipamv1alpha1.IPLeaseBound)
+			if assert.NotNil(t, cond, "Bound condition should have been reported") {
+				assert.Equal(t, metav1.ConditionFalse, cond.Status)
+				assert.Equal(t, "Unavailable", cond.Reason)
+			}
 		})
 	}
 }
