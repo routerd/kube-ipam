@@ -219,7 +219,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 func (r *IPLeaseReconciler) allocateDynamicIPs(
 	ctx context.Context, ipam Ipamer,
 	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
-) (ctrl.Result, error) {
+) (res ctrl.Result, err error) {
 	// Make sure we report the Lease Duration.
 	iplease.Status.LeaseDuration = ippool.Spec.LeaseDuration
 
@@ -228,6 +228,19 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 		unavailableIPFamilies []string
 		allocatedIPs          []goipam.IP
 	)
+
+	defer func() {
+		if err == nil {
+			return
+		}
+
+		// if we encounter any error, we want to free the acquired IPs
+		// so they are not blocked.
+		for _, ip := range allocatedIPs {
+			_, _ = ipam.ReleaseIP(&ip)
+		}
+	}()
+
 	if iplease.HasIPv4() {
 		if ippool.Spec.IPv4 != nil {
 			// IPv4
