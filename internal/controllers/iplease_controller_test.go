@@ -83,27 +83,27 @@ func TestIPLeaseReconciler(t *testing.T) {
 		On("Get", ippool).
 		Return(ipam, true)
 
-	c.On("Get", mock.Anything, ipleaseNN, mock.AnythingOfType("*adapter.IPv4Lease")).
+	c.On("Get", mock.Anything, ipleaseNN, mock.AnythingOfType("*v1alpha1.IPv4Lease")).
 		Run(func(args mock.Arguments) {
-			ipv4lease := args.Get(2).(*adapter.IPv4Lease)
-			*ipv4lease = *(iplease.(*adapter.IPv4Lease))
+			ipv4lease := args.Get(2).(*ipamv1alpha1.IPv4Lease)
+			*ipv4lease = *(iplease.ClientObject().(*ipamv1alpha1.IPv4Lease))
 		}).
 		Return(nil)
-	c.On("Get", mock.Anything, ippoolNN, mock.AnythingOfType("*adapter.IPv4Pool")).
+	c.On("Get", mock.Anything, ippoolNN, mock.AnythingOfType("*v1alpha1.IPv4Pool")).
 		Run(func(args mock.Arguments) {
-			ipv4pool := args.Get(2).(*adapter.IPv4Pool)
-			*ipv4pool = *(ippool.(*adapter.IPv4Pool))
+			ipv4pool := args.Get(2).(*ipamv1alpha1.IPv4Pool)
+			*ipv4pool = *(ippool.ClientObject().(*ipamv1alpha1.IPv4Pool))
 		}).
 		Return(nil)
 	c.On("Update",
-		mock.Anything, mock.AnythingOfType("*adapter.IPv4Lease"), mock.Anything).
+		mock.Anything, mock.AnythingOfType("*v1alpha1.IPv4Lease"), mock.Anything).
 		Return(nil)
-	var leaseStatusUpdate *adapter.IPv4Lease
+	var leaseStatusUpdate *ipamv1alpha1.IPv4Lease
 	c.StatusMock.
 		On("Update",
-			mock.Anything, mock.AnythingOfType("*adapter.IPv4Lease"), mock.Anything).
+			mock.Anything, mock.AnythingOfType("*v1alpha1.IPv4Lease"), mock.Anything).
 		Run(func(args mock.Arguments) {
-			leaseStatusUpdate = args.Get(1).(*adapter.IPv4Lease)
+			leaseStatusUpdate = args.Get(1).(*ipamv1alpha1.IPv4Lease)
 		}).
 		Return(nil)
 

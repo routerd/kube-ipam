@@ -20,6 +20,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 )
@@ -31,6 +32,10 @@ var (
 
 type IPv6Lease struct {
 	ipamv1alpha1.IPv6Lease
+}
+
+func (lease *IPv6Lease) ClientObject() client.Object {
+	return &lease.IPv6Lease
 }
 
 func (lease *IPv6Lease) GetSpecIPPoolName() string {
@@ -86,6 +91,10 @@ func (lease *IPv6Lease) SetStatusObservedGeneration(observedGeneration int64) {
 
 type IPv6LeaseList struct {
 	ipamv1alpha1.IPv6LeaseList
+}
+
+func (lease *IPv6LeaseList) ClientObjectList() client.ObjectList {
+	return &lease.IPv6LeaseList
 }
 
 func (leaseList *IPv6LeaseList) GetItems() []IPLease {

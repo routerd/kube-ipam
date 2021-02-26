@@ -66,19 +66,19 @@ func TestIPPoolReconciler(t *testing.T) {
 
 	c.On("Get", mock.Anything, ippoolNN, mock.Anything).
 		Run(func(args mock.Arguments) {
-			ipv4pool := args.Get(2).(*adapter.IPv4Pool)
-			*ipv4pool = *(ippool.(*adapter.IPv4Pool))
+			ipv4pool := args.Get(2).(*ipamv1alpha1.IPv4Pool)
+			*ipv4pool = *(ippool.ClientObject().(*ipamv1alpha1.IPv4Pool))
 		}).
 		Return(nil)
 	c.On("Update",
-		mock.Anything, mock.AnythingOfType("*adapter.IPv4Pool"), mock.Anything).
+		mock.Anything, mock.AnythingOfType("*v1alpha1.IPv4Pool"), mock.Anything).
 		Return(nil)
-	var poolStatusUpdate *adapter.IPv4Pool
+	var poolStatusUpdate *ipamv1alpha1.IPv4Pool
 	c.StatusMock.
 		On("Update",
-			mock.Anything, mock.AnythingOfType("*adapter.IPv4Pool"), mock.Anything).
+			mock.Anything, mock.AnythingOfType("*v1alpha1.IPv4Pool"), mock.Anything).
 		Run(func(args mock.Arguments) {
-			poolStatusUpdate = args.Get(1).(*adapter.IPv4Pool)
+			poolStatusUpdate = args.Get(1).(*ipamv1alpha1.IPv4Pool)
 		}).
 		Return(nil)
 
@@ -119,9 +119,9 @@ func TestIPPoolReconciler_createIPAM(t *testing.T) {
 		},
 	})
 
-	c.On("List", mock.Anything, mock.AnythingOfType("*adapter.IPv4LeaseList"), mock.Anything).
+	c.On("List", mock.Anything, mock.AnythingOfType("*v1alpha1.IPv4LeaseList"), mock.Anything).
 		Run(func(args mock.Arguments) {
-			leaseList := args.Get(1).(*adapter.IPv4LeaseList)
+			leaseList := args.Get(1).(*ipamv1alpha1.IPv4LeaseList)
 			leaseList.Items = []ipamv1alpha1.IPv4Lease{
 				{
 					Spec: ipamv1alpha1.IPv4LeaseSpec{
@@ -207,5 +207,5 @@ func TestIPPoolReconciler_handleDeletion(t *testing.T) {
 	require.NoError(t, err)
 
 	ipamCache.AssertCalled(t, "Free", ippool)
-	c.AssertCalled(t, "Update", mock.Anything, ippool, mock.Anything)
+	c.AssertCalled(t, "Update", mock.Anything, ippool.ClientObject(), mock.Anything)
 }

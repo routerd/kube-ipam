@@ -57,8 +57,8 @@ func (r *IPLeaseReconciler) Reconcile(
 	log := r.Log.WithValues("iplease", req.NamespacedName)
 
 	iplease := adapter.AdaptIPLease(
-		r.IPLeaseType.DeepCopyObject())
-	if err = r.Get(ctx, req.NamespacedName, iplease); err != nil {
+		r.IPLeaseType.ClientObject().DeepCopyObject())
+	if err = r.Get(ctx, req.NamespacedName, iplease.ClientObject()); err != nil {
 		return res, client.IgnoreNotFound(err)
 	}
 	defer func() {
@@ -90,11 +90,12 @@ func (r *IPLeaseReconciler) Reconcile(
 		return res, nil
 	}
 
-	ippool := adapter.AdaptIPPool(r.IPPoolType.DeepCopyObject())
+	ippool := adapter.AdaptIPPool(
+		r.IPPoolType.ClientObject().DeepCopyObject())
 	if err = r.Get(ctx, types.NamespacedName{
 		Name:      iplease.GetSpecIPPoolName(),
 		Namespace: iplease.GetNamespace(),
-	}, ippool); err != nil {
+	}, ippool.ClientObject()); err != nil {
 		return res, err
 	}
 
@@ -107,7 +108,7 @@ func (r *IPLeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// This Reconciler can work with multiple workers at once.
 			MaxConcurrentReconciles: 10,
 		}).
-		For(r.IPLeaseType).
+		For(r.IPLeaseType.ClientObject()).
 		Complete(r)
 }
 
@@ -175,7 +176,7 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 		return ctrl.Result{
 			// Retry to allocate later.
 			RequeueAfter: 5 * time.Second,
-		}, r.Status().Update(ctx, iplease)
+		}, r.Status().Update(ctx, iplease.ClientObject())
 	}
 
 	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, ip)
@@ -229,7 +230,7 @@ func (r *IPLeaseReconciler) reportAllocatedIPs(
 		ObservedGeneration: iplease.GetGeneration(),
 		Status:             metav1.ConditionTrue,
 	})
-	if err := r.Status().Update(ctx, iplease); err != nil {
+	if err := r.Status().Update(ctx, iplease.ClientObject()); err != nil {
 		// ensure to free IP again if we fail to commit to storage
 		_, _ = ipam.ReleaseIP(allocatedIP)
 		return err
@@ -240,11 +241,11 @@ func (r *IPLeaseReconciler) reportAllocatedIPs(
 func (r *IPLeaseReconciler) handleDeletion(
 	ctx context.Context, log logr.Logger, iplease adapter.IPLease) error {
 	// Lookup Pool to get the IPAM instance managing this address pool.
-	ippool := r.IPPoolType.DeepCopyObject().(adapter.IPPool)
+	ippool := adapter.AdaptIPPool(r.IPPoolType.ClientObject().DeepCopyObject())
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      iplease.GetSpecIPPoolName(),
 		Namespace: iplease.GetNamespace(),
-	}, ippool)
+	}, ippool.ClientObject())
 	if err != nil && !k8serrors.IsNotFound(err) {
 		// Some other error
 		return err
@@ -258,8 +259,9 @@ func (r *IPLeaseReconciler) handleDeletion(
 	}
 
 	// Cleanup Finalizer
-	controllerutil.RemoveFinalizer(iplease, ipamCacheFinalizer)
-	if err = r.Update(ctx, iplease); err != nil {
+	controllerutil.RemoveFinalizer(
+		iplease.ClientObject(), ipamCacheFinalizer)
+	if err = r.Update(ctx, iplease.ClientObject()); err != nil {
 		return err
 	}
 	return nil
@@ -270,18 +272,20 @@ func (r *IPLeaseReconciler) deleteIfExpired(
 	ctx context.Context, log logr.Logger, iplease adapter.IPLease) error {
 	if iplease.HasExpired() {
 		log.Info("lease expired")
-		return r.Delete(ctx, iplease)
+		return r.Delete(ctx, iplease.ClientObject())
 	}
 	return nil
 }
 
 // Ensure the cache finalizer is present
 func (r *IPLeaseReconciler) ensureCacheFinalizerAndOwner(ctx context.Context, iplease adapter.IPLease) error {
-	if controllerutil.ContainsFinalizer(iplease, ipamCacheFinalizer) {
+	if controllerutil.ContainsFinalizer(
+		iplease.ClientObject(), ipamCacheFinalizer) {
 		return nil
 	}
-	controllerutil.AddFinalizer(iplease, ipamCacheFinalizer)
-	if err := r.Update(ctx, iplease); err != nil {
+	controllerutil.AddFinalizer(
+		iplease.ClientObject(), ipamCacheFinalizer)
+	if err := r.Update(ctx, iplease.ClientObject()); err != nil {
 		return err
 	}
 	return nil

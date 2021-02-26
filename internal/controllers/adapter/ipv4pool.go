@@ -19,6 +19,8 @@ package adapter
 import (
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 )
 
@@ -26,6 +28,10 @@ var _ IPPool = (*IPv4Pool)(nil)
 
 type IPv4Pool struct {
 	ipamv1alpha1.IPv4Pool
+}
+
+func (lease *IPv4Pool) ClientObject() client.Object {
+	return &lease.IPv4Pool
 }
 
 func (pool *IPv4Pool) GetCIDR() string {

@@ -29,6 +29,7 @@ import (
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 	"routerd.net/kube-ipam/internal/controllers"
+	"routerd.net/kube-ipam/internal/controllers/adapter"
 )
 
 var (
@@ -66,23 +67,69 @@ func main() {
 
 	ipamCache := controllers.NewIPAMCache()
 
+	var (
+		ipv4PoolType      = adapter.AdaptIPPool(&ipamv1alpha1.IPv4Pool{})
+		ipv4LeaseType     = adapter.AdaptIPLease(&ipamv1alpha1.IPv4Lease{})
+		ipv4LeaseListType = adapter.AdaptIPLeaseList(&ipamv1alpha1.IPv4LeaseList{})
+
+		ipv6PoolType      = adapter.AdaptIPPool(&ipamv1alpha1.IPv6Pool{})
+		ipv6LeaseType     = adapter.AdaptIPLease(&ipamv1alpha1.IPv6Lease{})
+		ipv6LeaseListType = adapter.AdaptIPLeaseList(&ipamv1alpha1.IPv6LeaseList{})
+	)
+
+	// IPv4 Controllers
 	if err = (&controllers.IPPoolReconciler{
 		Client:    mgr.GetClient(),
-		Log:       ctrl.Log.WithName("controllers").WithName("IPPool"),
+		Log:       ctrl.Log.WithName("controllers").WithName("IPv4Pool"),
 		Scheme:    mgr.GetScheme(),
 		IPAMCache: ipamCache,
 		NewIPAM:   func() controllers.Ipamer { return ipam.New() },
+
+		IPPoolType:      ipv4PoolType,
+		IPLeaseType:     ipv4LeaseType,
+		IPLeaseListType: ipv4LeaseListType,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "IPPool")
+		setupLog.Error(err, "unable to create controller", "controller", "IPv4Pool")
 		os.Exit(1)
 	}
 	if err = (&controllers.IPLeaseReconciler{
 		Client:    mgr.GetClient(),
-		Log:       ctrl.Log.WithName("controllers").WithName("IPLease"),
+		Log:       ctrl.Log.WithName("controllers").WithName("IPv4Lease"),
 		Scheme:    mgr.GetScheme(),
 		IPAMCache: ipamCache,
+
+		IPPoolType:  ipv4PoolType,
+		IPLeaseType: ipv4LeaseType,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "IPLease")
+		setupLog.Error(err, "unable to create controller", "controller", "IPv4Lease")
+		os.Exit(1)
+	}
+
+	// IPv6 Controllers
+	if err = (&controllers.IPPoolReconciler{
+		Client:    mgr.GetClient(),
+		Log:       ctrl.Log.WithName("controllers").WithName("IPv6Pool"),
+		Scheme:    mgr.GetScheme(),
+		IPAMCache: ipamCache,
+		NewIPAM:   func() controllers.Ipamer { return ipam.New() },
+
+		IPPoolType:      ipv6PoolType,
+		IPLeaseType:     ipv6LeaseType,
+		IPLeaseListType: ipv6LeaseListType,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "IPv6Pool")
+		os.Exit(1)
+	}
+	if err = (&controllers.IPLeaseReconciler{
+		Client:    mgr.GetClient(),
+		Log:       ctrl.Log.WithName("controllers").WithName("IPv6Lease"),
+		Scheme:    mgr.GetScheme(),
+		IPAMCache: ipamCache,
+
+		IPPoolType:  ipv6PoolType,
+		IPLeaseType: ipv6LeaseType,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "IPv6Lease")
 		os.Exit(1)
 	}
 

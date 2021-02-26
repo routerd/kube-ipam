@@ -19,6 +19,8 @@ package adapter
 import (
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 )
 
@@ -26,6 +28,10 @@ var _ IPPool = (*IPv6Pool)(nil)
 
 type IPv6Pool struct {
 	ipamv1alpha1.IPv6Pool
+}
+
+func (lease *IPv6Pool) ClientObject() client.Object {
+	return &lease.IPv6Pool
 }
 
 func (pool *IPv6Pool) GetCIDR() string {

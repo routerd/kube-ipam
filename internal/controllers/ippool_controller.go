@@ -49,8 +49,8 @@ type IPPoolReconciler struct {
 func (r *IPPoolReconciler) Reconcile(
 	ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 	ippool := adapter.AdaptIPPool(
-		r.IPPoolType.DeepCopyObject())
-	if err = r.Get(ctx, req.NamespacedName, ippool); err != nil {
+		r.IPPoolType.ClientObject().DeepCopyObject())
+	if err = r.Get(ctx, req.NamespacedName, ippool.ClientObject()); err != nil {
 		return res, client.IgnoreNotFound(err)
 	}
 	if err := r.ensureCacheFinalizer(ctx, ippool); err != nil {
@@ -71,9 +71,9 @@ func (r *IPPoolReconciler) Reconcile(
 
 func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(r.IPPoolType).
+		For(r.IPPoolType.ClientObject()).
 		Watches(
-			&source.Kind{Type: r.IPLeaseType},
+			&source.Kind{Type: r.IPLeaseType.ClientObject()},
 			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
 				iplease, ok := obj.(adapter.IPLease)
 				if !ok {
@@ -96,11 +96,11 @@ func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // so we remove the allocated Ipamer from the IPAM Cache.
 func (r *IPPoolReconciler) ensureCacheFinalizer(
 	ctx context.Context, ippool adapter.IPPool) error {
-	if controllerutil.ContainsFinalizer(ippool, ipamCacheFinalizer) {
+	if controllerutil.ContainsFinalizer(ippool.ClientObject(), ipamCacheFinalizer) {
 		return nil
 	}
-	controllerutil.AddFinalizer(ippool, ipamCacheFinalizer)
-	if err := r.Update(ctx, ippool); err != nil {
+	controllerutil.AddFinalizer(ippool.ClientObject(), ipamCacheFinalizer)
+	if err := r.Update(ctx, ippool.ClientObject()); err != nil {
 		return err
 	}
 	return nil
@@ -112,8 +112,8 @@ func (r *IPPoolReconciler) handleDeletion(
 	ctx context.Context, ippool adapter.IPPool) error {
 	r.IPAMCache.Free(ippool)
 
-	controllerutil.RemoveFinalizer(ippool, ipamCacheFinalizer)
-	if err := r.Update(ctx, ippool); err != nil {
+	controllerutil.RemoveFinalizer(ippool.ClientObject(), ipamCacheFinalizer)
+	if err := r.Update(ctx, ippool.ClientObject()); err != nil {
 		return err
 	}
 	return nil
@@ -133,8 +133,8 @@ func (r *IPPoolReconciler) createIPAM(
 
 	// Add existing Leases
 	ipleaseList := adapter.AdaptIPLeaseList(
-		r.IPLeaseListType.DeepCopyObject())
-	if err := r.List(ctx, ipleaseList,
+		r.IPLeaseListType.ClientObjectList().DeepCopyObject())
+	if err := r.List(ctx, ipleaseList.ClientObjectList(),
 		client.InNamespace(ippool.GetNamespace())); err != nil {
 		return ipam, err
 	}
@@ -166,7 +166,7 @@ func (r *IPPoolReconciler) reportUsage(
 	ippool.SetAvailableIPs(int(u.AvailableIPs))
 	ippool.SetAllocatedIPs(int(u.AcquiredIPs))
 
-	if err := r.Status().Update(ctx, ippool); err != nil {
+	if err := r.Status().Update(ctx, ippool.ClientObject()); err != nil {
 		return err
 	}
 	return nil

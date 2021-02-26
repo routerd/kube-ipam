@@ -27,27 +27,20 @@ import (
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
 )
 
-var (
-	_ IPPool      = (*IPv4Pool)(nil)
-	_ IPPool      = (*IPv6Pool)(nil)
-	_ IPLease     = (*IPv4Lease)(nil)
-	_ IPLease     = (*IPv6Lease)(nil)
-	_ IPLeaseList = (*IPv4LeaseList)(nil)
-	_ IPLeaseList = (*IPv6LeaseList)(nil)
-)
-
 // Common accessor interface for IPPools
 type IPPool interface {
-	client.Object
+	metav1.Object
 	GetCIDR() string
 	GetSpecLeaseDuration() (leaseDuration time.Duration, ok bool)
 	SetAvailableIPs(int)
 	SetAllocatedIPs(int)
+
+	ClientObject() client.Object
 }
 
 // Common accessor interface for IPLeases
 type IPLease interface {
-	client.Object
+	metav1.Object
 	GetSpecType() ipamv1alpha1.IPLeaseType
 	GetSpecIPPoolName() string
 	GetSpecStaticAddress() string
@@ -60,13 +53,16 @@ type IPLease interface {
 	SetStatusPhase(string)
 	SetStatusObservedGeneration(int64)
 
+	ClientObject() client.Object
+
 	HasExpired() bool
 }
 
 // Common accessor interface for IPLeaseLists
 type IPLeaseList interface {
-	client.ObjectList
 	GetItems() []IPLease
+
+	ClientObjectList() client.ObjectList
 }
 
 func AdaptIPPool(ippool runtime.Object) IPPool {
