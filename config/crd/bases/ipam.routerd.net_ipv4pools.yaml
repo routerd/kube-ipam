@@ -19,7 +19,7 @@ spec:
   - additionalPrinterColumns:
     - jsonPath: .spec.cidr
       name: CIDR
-      type: integer
+      type: string
     - jsonPath: .status.availableIPs
       name: Available
       type: integer

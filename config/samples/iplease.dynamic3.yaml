@@ -1,8 +1,17 @@
 apiVersion: ipam.routerd.net/v1alpha1
-kind: IPLease
+kind: IPv4Lease
 metadata:
   name: sample-dynamic3
 spec:
   pool:
     name: sample
-  ipFamilies: [IPv4, IPv6]
+  type: Dynamic
+---
+apiVersion: ipam.routerd.net/v1alpha1
+kind: IPv6Lease
+metadata:
+  name: sample-dynamic3
+spec:
+  pool:
+    name: sample
+  type: Dynamic

@@ -134,6 +134,7 @@ func (r *IPLeaseReconciler) allocateIPs(
 		log.Info("trying allocating static ip from lease")
 		return r.allocateStaticIPs(ctx, ipam, iplease, ippool)
 	}
+	log.Info("WARNING unknown IPLeaseType", "type", iplease.GetSpecType())
 	return ctrl.Result{}, nil
 }
 
@@ -141,23 +142,10 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 	ctx context.Context, ipam Ipamer,
 	iplease adapter.IPLease, ippool adapter.IPPool,
 ) (res ctrl.Result, err error) {
-	var allocatedIPs []goipam.IP
-
-	defer func() {
-		if err != nil {
-			// if we encounter any error or could not acquire all IPs,
-			// we want to free the acquired IPs so they are not blocked.
-			for _, ip := range allocatedIPs {
-				_, _ = ipam.ReleaseIP(&ip)
-			}
-		}
-	}()
 
 	ip, err := ipam.AcquireSpecificIP(
 		ippool.GetCIDR(), iplease.GetSpecStaticAddress())
-	if err == nil {
-		allocatedIPs = append(allocatedIPs, *ip)
-	} else if !errors.Is(err, goipam.ErrNoIPAvailable) {
+	if err != nil && !errors.Is(err, goipam.ErrNoIPAvailable) {
 		return res, err
 	}
 
@@ -192,7 +180,7 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 	}
 
 	ip, err := ipam.AcquireIP(ippool.GetCIDR())
-	if !errors.Is(err, goipam.ErrNoIPAvailable) {
+	if err != nil && !errors.Is(err, goipam.ErrNoIPAvailable) {
 		return ctrl.Result{}, err
 	}
 

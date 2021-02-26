@@ -1,10 +1,15 @@
 apiVersion: ipam.routerd.net/v1alpha1
-kind: IPPool
+kind: IPv4Pool
 metadata:
   name: sample
 spec:
-  ipv4:
-    cidr: 172.20.0.0/24
-  ipv6:
-    cidr: fd9c:fd74:6b8d:1020::/64
+  cidr: 172.20.0.0/24
+  leaseDuration: 30s
+---
+apiVersion: ipam.routerd.net/v1alpha1
+kind: IPv6Pool
+metadata:
+  name: sample
+spec:
+  cidr: fd9c:fd74:6b8d:1020::/64
   leaseDuration: 30s

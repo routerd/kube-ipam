@@ -1,17 +1,22 @@
+# Example of a Static IP Assignment
 apiVersion: ipam.routerd.net/v1alpha1
 kind: IPv4Lease
 metadata:
-  name: sample-dynamic1
+  name: sample-router
 spec:
   pool:
     name: sample
-  type: Dynamic
+  type: Static
+  static:
+    address: 172.20.0.1
 ---
 apiVersion: ipam.routerd.net/v1alpha1
 kind: IPv6Lease
 metadata:
-  name: sample-dynamic1
+  name: sample-router
 spec:
   pool:
     name: sample
-  type: Dynamic
+  type: Static
+  static:
+    address: fd9c:fd74:6b8d:1020::1

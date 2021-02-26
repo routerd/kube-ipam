@@ -42,7 +42,7 @@ type IPv4PoolStatus struct {
 // IPv4Pool is the Schema for the ipv4pools API
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="CIDR",type="integer",JSONPath=".spec.cidr"
+// +kubebuilder:printcolumn:name="CIDR",type="string",JSONPath=".spec.cidr"
 // +kubebuilder:printcolumn:name="Available",type="integer",JSONPath=".status.availableIPs"
 // +kubebuilder:printcolumn:name="Allocated",type="integer",JSONPath=".status.allocatedIPs"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
