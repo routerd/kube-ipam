@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"net"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -32,23 +31,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
+	"routerd.net/kube-ipam/internal/controllers/adapter"
 )
 
-// IPPoolReconciler reconciles a IPPool object
 type IPPoolReconciler struct {
 	client.Client
 	Log       logr.Logger
 	Scheme    *runtime.Scheme
 	IPAMCache ipamCache
 	NewIPAM   func() Ipamer
-}
 
-// +kubebuilder:rbac:groups=ipam.routerd.net,resources=ippools,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=ipam.routerd.net,resources=ippools/status,verbs=get;update;patch
+	IPPoolType      adapter.IPPool
+	IPLeaseType     adapter.IPLease
+	IPLeaseListType adapter.IPLeaseList
+}
 
 func (r *IPPoolReconciler) Reconcile(
 	ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
-	ippool := &ipamv1alpha1.IPPool{}
+	ippool := adapter.AdaptIPPool(
+		r.IPPoolType.DeepCopyObject())
 	if err = r.Get(ctx, req.NamespacedName, ippool); err != nil {
 		return res, client.IgnoreNotFound(err)
 	}
@@ -56,7 +57,7 @@ func (r *IPPoolReconciler) Reconcile(
 		return res, err
 	}
 
-	if !ippool.DeletionTimestamp.IsZero() {
+	if !ippool.GetDeletionTimestamp().IsZero() {
 		return res, r.handleDeletion(ctx, ippool)
 	}
 
@@ -65,16 +66,16 @@ func (r *IPPoolReconciler) Reconcile(
 		return res, err
 	}
 
-	return ctrl.Result{}, r.reportUsage(ctx, ippool, ipam)
+	return res, r.reportUsage(ctx, ippool, ipam)
 }
 
 func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&ipamv1alpha1.IPPool{}).
+		For(r.IPPoolType).
 		Watches(
-			&source.Kind{Type: &ipamv1alpha1.IPLease{}},
+			&source.Kind{Type: r.IPLeaseType},
 			handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
-				iplease, ok := obj.(*ipamv1alpha1.IPLease)
+				iplease, ok := obj.(adapter.IPLease)
 				if !ok {
 					return nil
 				}
@@ -82,8 +83,8 @@ func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return []reconcile.Request{
 					{
 						NamespacedName: types.NamespacedName{
-							Name:      iplease.Spec.Pool.Name,
-							Namespace: iplease.Namespace,
+							Name:      iplease.GetSpecIPPoolName(),
+							Namespace: iplease.GetNamespace(),
 						},
 					},
 				}
@@ -91,18 +92,10 @@ func (r *IPPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *IPPoolReconciler) handleDeletion(ctx context.Context, ippool *ipamv1alpha1.IPPool) error {
-	// was deleted -> cleanup
-	r.IPAMCache.Free(ippool)
-
-	controllerutil.RemoveFinalizer(ippool, ipamCacheFinalizer)
-	if err := r.Update(ctx, ippool); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (r *IPPoolReconciler) ensureCacheFinalizer(ctx context.Context, ippool *ipamv1alpha1.IPPool) error {
+// ensure that the IPPool has the ipamCacheFinalizer,
+// so we remove the allocated Ipamer from the IPAM Cache.
+func (r *IPPoolReconciler) ensureCacheFinalizer(
+	ctx context.Context, ippool adapter.IPPool) error {
 	if controllerutil.ContainsFinalizer(ippool, ipamCacheFinalizer) {
 		return nil
 	}
@@ -113,89 +106,68 @@ func (r *IPPoolReconciler) ensureCacheFinalizer(ctx context.Context, ippool *ipa
 	return nil
 }
 
-func (r *IPPoolReconciler) reportUsage(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool, ipam Ipamer) error {
-	ippool.Status.IPv4 = nil
-	ippool.Status.IPv6 = nil
-	if ippool.Spec.IPv4 != nil {
-		ipv4Prefix := ipam.PrefixFrom(ippool.Spec.IPv4.CIDR)
-		u := ipv4Prefix.Usage()
-		ippool.Status.IPv4 = &ipamv1alpha1.IPTypePoolStatus{
-			AvailableIPs: int(u.AvailableIPs),
-			AllocatedIPs: int(u.AcquiredIPs),
-		}
-	}
+// handle the deletion of an IPPool by clearing the Ipamer and
+// removing the finalizer
+func (r *IPPoolReconciler) handleDeletion(
+	ctx context.Context, ippool adapter.IPPool) error {
+	r.IPAMCache.Free(ippool)
 
-	if ippool.Spec.IPv6 != nil {
-		ipv6Prefix := ipam.PrefixFrom(ippool.Spec.IPv6.CIDR)
-		u := ipv6Prefix.Usage()
-		ippool.Status.IPv6 = &ipamv1alpha1.IPTypePoolStatus{
-			AvailableIPs: int(u.AvailableIPs),
-			AllocatedIPs: int(u.AcquiredIPs),
-		}
-	}
-	if err := r.Status().Update(ctx, ippool); err != nil {
+	controllerutil.RemoveFinalizer(ippool, ipamCacheFinalizer)
+	if err := r.Update(ctx, ippool); err != nil {
 		return err
 	}
 	return nil
 }
 
+// create an IPAM instance for the given pool and seed it from cache.
 func (r *IPPoolReconciler) createIPAM(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool) (Ipamer, error) {
+	ctx context.Context, ippool adapter.IPPool) (Ipamer, error) {
 	// Create new IPAM
 	ipam := r.NewIPAM()
 
-	// Add Pool CIDRs
-	if ippool.Spec.IPv4 != nil {
-		_, err := ipam.NewPrefix(ippool.Spec.IPv4.CIDR)
-		if err != nil {
-			return ipam, err
-		}
-	}
-	if ippool.Spec.IPv6 != nil {
-		_, err := ipam.NewPrefix(ippool.Spec.IPv6.CIDR)
-		if err != nil {
-			return ipam, err
-		}
+	// Add Pool CIDR
+	_, err := ipam.NewPrefix(ippool.GetCIDR())
+	if err != nil {
+		return nil, err
 	}
 
 	// Add existing Leases
-	ipleaseList := &ipamv1alpha1.IPLeaseList{}
+	ipleaseList := adapter.AdaptIPLeaseList(
+		r.IPLeaseListType.DeepCopyObject())
 	if err := r.List(ctx, ipleaseList,
-		client.InNamespace(ippool.Namespace)); err != nil {
+		client.InNamespace(ippool.GetNamespace())); err != nil {
 		return ipam, err
 	}
-	for _, iplease := range ipleaseList.Items {
-		if iplease.Spec.Pool.Name != ippool.Name {
+	for _, iplease := range ipleaseList.GetItems() {
+		if iplease.GetSpecIPPoolName() != ippool.GetName() {
 			continue
 		}
 		if !meta.IsStatusConditionTrue(
-			iplease.Status.Conditions, ipamv1alpha1.IPLeaseBound) {
+			*iplease.GetStatusConditions(), ipamv1alpha1.IPLeaseBound) {
 			continue
 		}
 		if iplease.HasExpired() {
 			continue
 		}
 
-		for _, addr := range iplease.Status.Addresses {
-			ip := net.ParseIP(addr)
-			if ip == nil {
-				continue
-			}
-
-			if ip.To4() != nil && ippool.Spec.IPv4 != nil {
-				_, err := ipam.AcquireSpecificIP(ippool.Spec.IPv4.CIDR, addr)
-				if err != nil {
-					return ipam, err
-				}
-			}
-			if ip.To4() == nil && ippool.Spec.IPv6 != nil {
-				_, err := ipam.AcquireSpecificIP(ippool.Spec.IPv6.CIDR, addr)
-				if err != nil {
-					return ipam, err
-				}
-			}
+		_, err := ipam.AcquireSpecificIP(
+			ippool.GetCIDR(), iplease.GetStatusAddress())
+		if err != nil {
+			return ipam, err
 		}
 	}
 	return ipam, nil
+}
+
+func (r *IPPoolReconciler) reportUsage(
+	ctx context.Context, ippool adapter.IPPool, ipam Ipamer) error {
+	ipv4Prefix := ipam.PrefixFrom(ippool.GetCIDR())
+	u := ipv4Prefix.Usage()
+	ippool.SetAvailableIPs(int(u.AvailableIPs))
+	ippool.SetAllocatedIPs(int(u.AcquiredIPs))
+
+	if err := r.Status().Update(ctx, ippool); err != nil {
+		return err
+	}
+	return nil
 }

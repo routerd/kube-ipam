@@ -20,13 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	goipam "github.com/metal-stack/go-ipam"
-	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
+	"routerd.net/kube-ipam/internal/controllers/adapter"
 )
 
 // IPLeaseReconciler reconciles a IPLease object
@@ -46,6 +44,9 @@ type IPLeaseReconciler struct {
 	Log       logr.Logger
 	Scheme    *runtime.Scheme
 	IPAMCache ipamCache
+
+	IPPoolType  adapter.IPPool
+	IPLeaseType adapter.IPLease
 }
 
 // +kubebuilder:rbac:groups=ipam.routerd.net,resources=ipleases,verbs=get;list;watch;create;update;patch;delete
@@ -55,24 +56,26 @@ func (r *IPLeaseReconciler) Reconcile(
 	ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 	log := r.Log.WithValues("iplease", req.NamespacedName)
 
-	iplease := &ipamv1alpha1.IPLease{}
+	iplease := adapter.AdaptIPLease(
+		r.IPLeaseType.DeepCopyObject())
 	if err = r.Get(ctx, req.NamespacedName, iplease); err != nil {
 		return res, client.IgnoreNotFound(err)
 	}
 	defer func() {
 		// ensure that no matter how we exit the reconcile function,
 		// we want to reconcile the IPLease after the lease duration expired.
-		if iplease.Status.LeaseDuration == nil {
+		leaseDuration, ok := iplease.GetStatusLeaseDuration()
+		if !ok {
 			return
 		}
-		log.Info("waiting for lease expire", "duration", iplease.Status.LeaseDuration.Duration)
-		res.RequeueAfter = iplease.Status.LeaseDuration.Duration
+		log.Info("waiting for lease expire", "duration", leaseDuration)
+		res.RequeueAfter = leaseDuration
 	}()
 
-	if err := r.ensureCacheFinalizer(ctx, iplease); err != nil {
+	if err := r.ensureCacheFinalizerAndOwner(ctx, iplease); err != nil {
 		return res, fmt.Errorf("ensuring finalizer: %w", err)
 	}
-	if !iplease.DeletionTimestamp.IsZero() {
+	if !iplease.GetDeletionTimestamp().IsZero() {
 		return res, r.handleDeletion(ctx, log, iplease)
 	}
 	if err := r.deleteIfExpired(ctx, log, iplease); err != nil {
@@ -80,16 +83,17 @@ func (r *IPLeaseReconciler) Reconcile(
 	}
 
 	// Guard IP Allocation
-	if meta.IsStatusConditionTrue(iplease.Status.Conditions, ipamv1alpha1.IPLeaseBound) {
+	if meta.IsStatusConditionTrue(
+		*iplease.GetStatusConditions(), ipamv1alpha1.IPLeaseBound) {
 		// already Bound or not Bound and Expired
 		// just check if expireTime needs updating
 		return res, nil
 	}
 
-	ippool := &ipamv1alpha1.IPPool{}
+	ippool := adapter.AdaptIPPool(r.IPPoolType.DeepCopyObject())
 	if err = r.Get(ctx, types.NamespacedName{
-		Name:      iplease.Spec.Pool.Name,
-		Namespace: iplease.Namespace,
+		Name:      iplease.GetSpecIPPoolName(),
+		Namespace: iplease.GetNamespace(),
 	}, ippool); err != nil {
 		return res, err
 	}
@@ -103,39 +107,43 @@ func (r *IPLeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// This Reconciler can work with multiple workers at once.
 			MaxConcurrentReconciles: 10,
 		}).
-		For(&ipamv1alpha1.IPLease{}).
+		For(r.IPLeaseType).
 		Complete(r)
 }
 
 func (r *IPLeaseReconciler) allocateIPs(
 	ctx context.Context, log logr.Logger,
-	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
+	iplease adapter.IPLease, ippool adapter.IPPool,
 ) (ctrl.Result, error) {
 	ipam, ok := r.IPAMCache.Get(ippool)
 	if !ok {
-		log.Info("missing IPAM cache, waiting for cache sync", "ippool", ippool.Namespace+"/"+ippool.Name, "ippool.uid", ippool.UID)
+		log.Info(
+			"missing IPAM cache, waiting for cache sync",
+			"ippool", ippool.GetNamespace()+"/"+ippool.GetName(),
+			"ippool.uid", ippool.GetUID())
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if iplease.Spec.Static == nil {
+	switch iplease.GetSpecType() {
+	case ipamv1alpha1.IPLeaseTypeDynamic:
 		log.Info("trying allocating dynamic ip from pool")
 		return r.allocateDynamicIPs(ctx, ipam, iplease, ippool)
+
+	case ipamv1alpha1.IPLeaseTypeStatic:
+		log.Info("trying allocating static ip from lease")
+		return r.allocateStaticIPs(ctx, ipam, iplease, ippool)
 	}
-	log.Info("trying allocating static ip from lease")
-	return r.allocateStaticIPs(ctx, ipam, iplease, ippool)
+	return ctrl.Result{}, nil
 }
 
 func (r *IPLeaseReconciler) allocateStaticIPs(
 	ctx context.Context, ipam Ipamer,
-	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
+	iplease adapter.IPLease, ippool adapter.IPPool,
 ) (res ctrl.Result, err error) {
-	var (
-		unavailableIPs []string
-		allocatedIPs   []goipam.IP
-	)
+	var allocatedIPs []goipam.IP
 
 	defer func() {
-		if err != nil || len(unavailableIPs) > 0 {
+		if err != nil {
 			// if we encounter any error or could not acquire all IPs,
 			// we want to free the acquired IPs so they are not blocked.
 			for _, ip := range allocatedIPs {
@@ -144,65 +152,24 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 		}
 	}()
 
-	for _, addr := range iplease.Spec.Static.Addresses {
-		ip := net.ParseIP(addr)
-		if ip == nil {
-			unavailableIPs = append(unavailableIPs, addr)
-			continue
-		}
-
-		if ip.To4() != nil {
-			// try to acquire specific IPv4
-			if ippool.Spec.IPv4 == nil {
-				// can't allocate an IPv4 if the Pool has no IPv4 CIDR.
-				unavailableIPs = append(unavailableIPs, addr)
-				continue
-			}
-
-			ip, err := ipam.AcquireSpecificIP(ippool.Spec.IPv4.CIDR, addr)
-			if errors.Is(err, goipam.ErrNoIPAvailable) {
-				unavailableIPs = append(unavailableIPs, addr)
-				continue
-			}
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			allocatedIPs = append(allocatedIPs, *ip)
-			continue
-		} else {
-			// try to acquire specific IPv6
-			if ippool.Spec.IPv6 == nil {
-				// can't allocate an IPv6 if the Pool has no IPv6 CIDR.
-				unavailableIPs = append(unavailableIPs, addr)
-				continue
-			}
-
-			ip, err := ipam.AcquireSpecificIP(ippool.Spec.IPv6.CIDR, addr)
-			if errors.Is(err, goipam.ErrNoIPAvailable) {
-				unavailableIPs = append(unavailableIPs, addr)
-				continue
-			}
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			allocatedIPs = append(allocatedIPs, *ip)
-			continue
-		}
+	ip, err := ipam.AcquireSpecificIP(
+		ippool.GetCIDR(), iplease.GetSpecStaticAddress())
+	if err == nil {
+		allocatedIPs = append(allocatedIPs, *ip)
+	} else if !errors.Is(err, goipam.ErrNoIPAvailable) {
+		return res, err
 	}
 
-	if len(unavailableIPs) > 0 {
-		// ensure to free IPs we wanted to allocate
-		for _, ip := range allocatedIPs {
-			_, _ = ipam.ReleaseIP(&ip)
-		}
-
-		iplease.Status.Phase = "Unavailable"
-		iplease.Status.ObservedGeneration = iplease.Generation
-		meta.SetStatusCondition(&iplease.Status.Conditions, metav1.Condition{
-			Type:               ipamv1alpha1.IPLeaseBound,
-			Reason:             "Unavailable",
-			Message:            fmt.Sprintf("could not allocate IPs: %s", strings.Join(unavailableIPs, ", ")),
-			ObservedGeneration: iplease.Generation,
+	if errors.Is(err, goipam.ErrNoIPAvailable) {
+		iplease.SetStatusPhase("Unavailable")
+		iplease.SetStatusObservedGeneration(iplease.GetGeneration())
+		meta.SetStatusCondition(iplease.GetStatusConditions(), metav1.Condition{
+			Type:   ipamv1alpha1.IPLeaseBound,
+			Reason: "Unavailable",
+			Message: fmt.Sprintf(
+				"could not allocate IP: %s",
+				iplease.GetSpecStaticAddress()),
+			ObservedGeneration: iplease.GetGeneration(),
 			Status:             metav1.ConditionFalse,
 		})
 		return ctrl.Result{
@@ -211,85 +178,31 @@ func (r *IPLeaseReconciler) allocateStaticIPs(
 		}, r.Status().Update(ctx, iplease)
 	}
 
-	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, allocatedIPs)
+	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, ip)
 }
 
 func (r *IPLeaseReconciler) allocateDynamicIPs(
 	ctx context.Context, ipam Ipamer,
-	iplease *ipamv1alpha1.IPLease, ippool *ipamv1alpha1.IPPool,
+	iplease adapter.IPLease, ippool adapter.IPPool,
 ) (res ctrl.Result, err error) {
-	// Make sure we report the Lease Duration.
-	iplease.Status.LeaseDuration = ippool.Spec.LeaseDuration
-
-	var (
-		unavailableCIDRs      []string
-		unavailableIPFamilies []string
-		allocatedIPs          []goipam.IP
-	)
-
-	defer func() {
-		if err != nil ||
-			len(unavailableCIDRs) > 0 ||
-			len(unavailableIPFamilies) > 0 {
-			// if we encounter any error or could not acquire all IPs,
-			// we want to free the acquired IPs so they are not blocked.
-			for _, ip := range allocatedIPs {
-				_, _ = ipam.ReleaseIP(&ip)
-			}
-		}
-	}()
-
-	if iplease.HasIPv4() {
-		if ippool.Spec.IPv4 != nil {
-			// IPv4
-			ip, err := ipam.AcquireIP(ippool.Spec.IPv4.CIDR)
-			if errors.Is(err, goipam.ErrNoIPAvailable) {
-				unavailableCIDRs = append(unavailableCIDRs, ippool.Spec.IPv4.CIDR)
-			} else if err != nil {
-				return ctrl.Result{}, err
-			}
-
-			allocatedIPs = append(allocatedIPs, *ip)
-		} else {
-			// Pool does not support IPv4
-			unavailableIPFamilies = append(unavailableIPFamilies, string(corev1.IPv4Protocol))
-		}
+	// Make sure we report the Lease Duration if set on pool.
+	if leaseDuration, ok := ippool.GetSpecLeaseDuration(); ok {
+		iplease.SetStatusLeaseDuration(leaseDuration)
 	}
 
-	if iplease.HasIPv6() {
-		if ippool.Spec.IPv6 != nil {
-			// IPv6
-			ip, err := ipam.AcquireIP(ippool.Spec.IPv6.CIDR)
-			if errors.Is(err, goipam.ErrNoIPAvailable) {
-				unavailableCIDRs = append(unavailableCIDRs, ippool.Spec.IPv6.CIDR)
-			} else if err != nil {
-				return ctrl.Result{}, err
-			}
-
-			allocatedIPs = append(allocatedIPs, *ip)
-		} else {
-			// Pool does not support IPv6
-			unavailableIPFamilies = append(unavailableIPFamilies, string(corev1.IPv6Protocol))
-		}
+	ip, err := ipam.AcquireIP(ippool.GetCIDR())
+	if !errors.Is(err, goipam.ErrNoIPAvailable) {
+		return ctrl.Result{}, err
 	}
 
-	if len(unavailableCIDRs) > 0 ||
-		len(unavailableIPFamilies) > 0 {
-		msg := "could not allocate IPs"
-		if len(unavailableCIDRs) > 0 {
-			msg += " from CIDRS: " + strings.Join(unavailableCIDRs, ", ")
-		}
-		if len(unavailableIPFamilies) > 0 {
-			msg += " from unsupported IP Families: " + strings.Join(unavailableIPFamilies, ", ")
-		}
-
-		iplease.Status.Phase = "Unavailable"
-		iplease.Status.ObservedGeneration = iplease.Generation
-		meta.SetStatusCondition(&iplease.Status.Conditions, metav1.Condition{
+	if errors.Is(err, goipam.ErrNoIPAvailable) {
+		iplease.SetStatusPhase("Unavailable")
+		iplease.SetStatusObservedGeneration(iplease.GetGeneration())
+		meta.SetStatusCondition(iplease.GetStatusConditions(), metav1.Condition{
 			Type:               ipamv1alpha1.IPLeaseBound,
 			Reason:             "Unavailable",
-			Message:            msg,
-			ObservedGeneration: iplease.Generation,
+			Message:            "No more IPs available from pool.",
+			ObservedGeneration: iplease.GetGeneration(),
 			Status:             metav1.ConditionFalse,
 		})
 		return ctrl.Result{
@@ -298,38 +211,39 @@ func (r *IPLeaseReconciler) allocateDynamicIPs(
 		}, nil
 	}
 
-	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, allocatedIPs)
+	return ctrl.Result{}, r.reportAllocatedIPs(ctx, iplease, ipam, ip)
 }
 
 func (r *IPLeaseReconciler) reportAllocatedIPs(
-	ctx context.Context, iplease *ipamv1alpha1.IPLease,
-	ipam Ipamer, allocatedIPs []goipam.IP,
+	ctx context.Context, iplease adapter.IPLease,
+	ipam Ipamer, allocatedIP *goipam.IP,
 ) error {
-	for _, ip := range allocatedIPs {
-		iplease.Status.Addresses = append(iplease.Status.Addresses, ip.IP.String())
-	}
-	iplease.Status.Phase = "Bound"
-	iplease.Status.ObservedGeneration = iplease.Generation
-	meta.SetStatusCondition(&iplease.Status.Conditions, metav1.Condition{
+	iplease.SetStatusAddress(allocatedIP.IP.String())
+	iplease.SetStatusPhase("Bound")
+
+	iplease.SetStatusObservedGeneration(iplease.GetGeneration())
+	meta.SetStatusCondition(iplease.GetStatusConditions(), metav1.Condition{
 		Type:               ipamv1alpha1.IPLeaseBound,
 		Reason:             "IPAllocated",
 		Message:            "successfully allocated ips",
-		ObservedGeneration: iplease.Generation,
+		ObservedGeneration: iplease.GetGeneration(),
 		Status:             metav1.ConditionTrue,
 	})
 	if err := r.Status().Update(ctx, iplease); err != nil {
+		// ensure to free IP again if we fail to commit to storage
+		_, _ = ipam.ReleaseIP(allocatedIP)
 		return err
 	}
 	return nil
 }
 
 func (r *IPLeaseReconciler) handleDeletion(
-	ctx context.Context, log logr.Logger, iplease *ipamv1alpha1.IPLease) error {
+	ctx context.Context, log logr.Logger, iplease adapter.IPLease) error {
 	// Lookup Pool to get the IPAM instance managing this address pool.
-	ippool := &ipamv1alpha1.IPPool{}
+	ippool := r.IPPoolType.DeepCopyObject().(adapter.IPPool)
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      iplease.Spec.Pool.Name,
-		Namespace: iplease.Namespace,
+		Name:      iplease.GetSpecIPPoolName(),
+		Namespace: iplease.GetNamespace(),
 	}, ippool)
 	if err != nil && !k8serrors.IsNotFound(err) {
 		// Some other error
@@ -353,7 +267,7 @@ func (r *IPLeaseReconciler) handleDeletion(
 
 // check when the IPLease expires
 func (r *IPLeaseReconciler) deleteIfExpired(
-	ctx context.Context, log logr.Logger, iplease *ipamv1alpha1.IPLease) error {
+	ctx context.Context, log logr.Logger, iplease adapter.IPLease) error {
 	if iplease.HasExpired() {
 		log.Info("lease expired")
 		return r.Delete(ctx, iplease)
@@ -362,7 +276,7 @@ func (r *IPLeaseReconciler) deleteIfExpired(
 }
 
 // Ensure the cache finalizer is present
-func (r *IPLeaseReconciler) ensureCacheFinalizer(ctx context.Context, iplease *ipamv1alpha1.IPLease) error {
+func (r *IPLeaseReconciler) ensureCacheFinalizerAndOwner(ctx context.Context, iplease adapter.IPLease) error {
 	if controllerutil.ContainsFinalizer(iplease, ipamCacheFinalizer) {
 		return nil
 	}
@@ -375,45 +289,15 @@ func (r *IPLeaseReconciler) ensureCacheFinalizer(ctx context.Context, iplease *i
 
 func (r *IPLeaseReconciler) freeLease(
 	log logr.Logger,
-	ippool *ipamv1alpha1.IPPool, iplease *ipamv1alpha1.IPLease) error {
+	ippool adapter.IPPool, iplease adapter.IPLease) error {
 	ipam, ok := r.IPAMCache.Get(ippool)
 	if !ok {
 		return nil
 	}
 
-	for _, addr := range iplease.Status.Addresses {
-		ip := net.ParseIP(addr)
-		if ip == nil {
-			continue
-		}
-
-		if ippool.Spec.IPv4 != nil &&
-			ip.To4() != nil {
-			// Free IPv4
-			err := ipam.ReleaseIPFromPrefix(ippool.Spec.IPv4.CIDR, addr)
-			if errors.Is(err, goipam.ErrNotFound) {
-				// don't care
-				continue
-			}
-
-			if err != nil {
-				log.Error(err, "could not release IPv4 %s from %s", addr, ippool.Spec.IPv4.CIDR)
-			}
-		}
-
-		if ippool.Spec.IPv6 != nil &&
-			ip.To4() == nil {
-			// Free IPv6
-			err := ipam.ReleaseIPFromPrefix(ippool.Spec.IPv6.CIDR, addr)
-			if errors.Is(err, goipam.ErrNotFound) {
-				// don't care
-				continue
-			}
-
-			if err != nil {
-				log.Error(err, "could not release IPv6 %s from %s", addr, ippool.Spec.IPv6.CIDR)
-			}
-		}
+	err := ipam.ReleaseIPFromPrefix(ippool.GetCIDR(), iplease.GetStatusAddress())
+	if errors.Is(err, goipam.ErrNotFound) {
+		return nil
 	}
-	return nil
+	return err
 }

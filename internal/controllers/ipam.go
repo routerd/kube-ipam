@@ -23,24 +23,18 @@ import (
 	goipam "github.com/metal-stack/go-ipam"
 	"k8s.io/apimachinery/pkg/types"
 
-	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
+	"routerd.net/kube-ipam/internal/controllers/adapter"
 )
 
 const ipamCacheFinalizer = "ipam.routerd.net/ipam-cache"
 
-// IPAMCache caches Ipamer instances for IPPool objects.
-type IPAMCache struct {
-	ipams    map[types.UID]Ipamer
-	ipamsMux sync.RWMutex
-}
-
 type ipamCache interface {
 	GetOrCreate(
-		ctx context.Context, ippool *ipamv1alpha1.IPPool,
+		ctx context.Context, ippool adapter.IPPool,
 		create ipamCreateFn,
 	) (Ipamer, error)
-	Free(ippool *ipamv1alpha1.IPPool)
-	Get(ippool *ipamv1alpha1.IPPool) (Ipamer, bool)
+	Free(ippool adapter.IPPool)
+	Get(ippool adapter.IPPool) (Ipamer, bool)
 }
 
 type Ipamer interface {
@@ -53,8 +47,16 @@ type Ipamer interface {
 }
 
 type ipamCreateFn func(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool,
+	ctx context.Context, ippool adapter.IPPool,
 ) (Ipamer, error)
+
+// IPAMCache caches Ipamer instances for IPPool objects.
+type IPAMCache struct {
+	ipams    map[types.UID]Ipamer
+	ipamsMux sync.RWMutex
+}
+
+var _ ipamCache = (*IPAMCache)(nil)
 
 func NewIPAMCache() *IPAMCache {
 	return &IPAMCache{
@@ -65,13 +67,13 @@ func NewIPAMCache() *IPAMCache {
 // GetOrCreate returns a cached IPAM instance or
 // calls the createFn to create the instance.
 func (i *IPAMCache) GetOrCreate(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool,
+	ctx context.Context, ippool adapter.IPPool,
 	create ipamCreateFn,
 ) (Ipamer, error) {
 	i.ipamsMux.Lock()
 	defer i.ipamsMux.Unlock()
 
-	if ipam, ok := i.ipams[ippool.UID]; ok {
+	if ipam, ok := i.ipams[ippool.GetUID()]; ok {
 		return ipam, nil
 	}
 
@@ -79,22 +81,22 @@ func (i *IPAMCache) GetOrCreate(
 	if err != nil {
 		return nil, err
 	}
-	i.ipams[ippool.UID] = ipam
+	i.ipams[ippool.GetUID()] = ipam
 	return ipam, nil
 }
 
 // Get returns a cached IPAM instance if it exists.
-func (i *IPAMCache) Get(ippool *ipamv1alpha1.IPPool) (Ipamer, bool) {
+func (i *IPAMCache) Get(ippool adapter.IPPool) (Ipamer, bool) {
 	i.ipamsMux.RLock()
 	defer i.ipamsMux.RUnlock()
-	ipam, ok := i.ipams[ippool.UID]
+	ipam, ok := i.ipams[ippool.GetUID()]
 	return ipam, ok
 }
 
 // Free removes a cached IPAM instance for the given IPPool.
-func (i *IPAMCache) Free(ippool *ipamv1alpha1.IPPool) {
+func (i *IPAMCache) Free(ippool adapter.IPPool) {
 	i.ipamsMux.Lock()
 	defer i.ipamsMux.Unlock()
 
-	delete(i.ipams, ippool.UID)
+	delete(i.ipams, ippool.GetUID())
 }

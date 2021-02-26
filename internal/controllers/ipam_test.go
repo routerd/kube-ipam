@@ -28,14 +28,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	ipamv1alpha1 "routerd.net/kube-ipam/api/v1alpha1"
+	"routerd.net/kube-ipam/internal/controllers/adapter"
 )
 
 func TestIPAMCache(t *testing.T) {
-	ippool := &ipamv1alpha1.IPPool{
+	ippool := adapter.AdaptIPPool(&ipamv1alpha1.IPv4Pool{
 		ObjectMeta: metav1.ObjectMeta{
 			UID: types.UID("1234"),
 		},
-	}
+	})
 
 	cache := NewIPAMCache()
 
@@ -50,7 +51,7 @@ func TestIPAMCache(t *testing.T) {
 	var createCalled bool
 	ipam, err := cache.GetOrCreate(
 		ctx, ippool,
-		func(ctx context.Context, ippool *ipamv1alpha1.IPPool) (Ipamer, error) {
+		func(ctx context.Context, ippool adapter.IPPool) (Ipamer, error) {
 			createCalled = true
 			return nil, nil
 		})
@@ -62,7 +63,7 @@ func TestIPAMCache(t *testing.T) {
 	var createCalledAgain bool
 	ipam, err = cache.GetOrCreate(
 		ctx, ippool,
-		func(ctx context.Context, ippool *ipamv1alpha1.IPPool) (Ipamer, error) {
+		func(ctx context.Context, ippool adapter.IPPool) (Ipamer, error) {
 			createCalledAgain = true
 			return nil, nil
 		})
@@ -88,7 +89,7 @@ type ipamCacheMock struct {
 }
 
 func (m *ipamCacheMock) GetOrCreate(
-	ctx context.Context, ippool *ipamv1alpha1.IPPool,
+	ctx context.Context, ippool adapter.IPPool,
 	create ipamCreateFn,
 ) (Ipamer, error) {
 	args := m.Called(ctx, ippool, create)
@@ -97,11 +98,11 @@ func (m *ipamCacheMock) GetOrCreate(
 	return ipam, err
 }
 
-func (m *ipamCacheMock) Free(ippool *ipamv1alpha1.IPPool) {
+func (m *ipamCacheMock) Free(ippool adapter.IPPool) {
 	m.Called(ippool)
 }
 
-func (m *ipamCacheMock) Get(ippool *ipamv1alpha1.IPPool) (Ipamer, bool) {
+func (m *ipamCacheMock) Get(ippool adapter.IPPool) (Ipamer, bool) {
 	args := m.Called(ippool)
 	ipam, _ := args.Get(0).(Ipamer)
 	return ipam, args.Bool(1)

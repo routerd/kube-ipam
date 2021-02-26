@@ -6,33 +6,39 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.2.5
   creationTimestamp: null
-  name: ipleases.ipam.routerd.net
+  name: ipv4leases.ipam.routerd.net
 spec:
   group: ipam.routerd.net
   names:
-    kind: IPLease
-    listKind: IPLeaseList
-    plural: ipleases
-    singular: iplease
+    kind: IPv4Lease
+    listKind: IPv4LeaseList
+    plural: ipv4leases
+    singular: ipv4lease
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Status
+    - jsonPath: .spec.pool.name
+      name: Pool
       type: string
-    - jsonPath: .status.addresses
-      name: Addresses
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.address
+      name: Address
       type: string
     - jsonPath: .spec.renewTime
       name: Renew
       type: date
+    - jsonPath: .status.phase
+      name: Status
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: IPLease is the Schema for the ipleases API
+        description: IPv4Lease is the Schema for the ipv4leases API
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -47,18 +53,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: IPLeaseSpec defines the desired state of IPLease
+            description: IPv4LeaseSpec defines the desired state of IPv4Lease
             properties:
-              ipFamilies:
-                description: IPFamilies that this lease should include.
-                items:
-                  description: IPFamily represents the IP Family (IPv4 or IPv6). This
-                    type is used to express the family of an IP expressed by a type
-                    (e.g. service.spec.ipFamilies).
-                  type: string
-                type: array
               pool:
-                description: References the pool to lease an IP from.
+                description: References the IPv4Pool to lease an IP from.
                 properties:
                   name:
                     type: string
@@ -74,26 +72,29 @@ spec:
               static:
                 description: Static IP lease settings.
                 properties:
-                  addresses:
-                    description: List of addresses to try to lease from the pool.
-                    items:
-                      type: string
-                    type: array
+                  address:
+                    description: Static address to lease.
+                    type: string
                 required:
-                - addresses
+                - address
                 type: object
+              type:
+                default: Dynamic
+                description: Type of the IPv4Lease.
+                enum:
+                - Dynamic
+                - Static
+                type: string
             required:
-            - ipFamilies
             - pool
+            - type
             type: object
           status:
-            description: IPLeaseStatus defines the observed state of IPLease
+            description: IPv4LeaseStatus defines the observed state of IPv4Lease
             properties:
-              addresses:
-                description: List of leased addresses.
-                items:
-                  type: string
-                type: array
+              address:
+                description: Leased IP Address
+                type: string
               conditions:
                 description: Conditions is a list of status conditions ths object
                   is in.
